@@ -20,7 +20,6 @@ from shutil import copyfile
 import G2Paths
 
 try:
-    from G2Health import G2Health
     from senzing import G2Config, G2ConfigMgr, G2Exception, G2IniParams, G2ModuleGenericException
 except Exception:
     pass
