@@ -1,4 +1,4 @@
-# docker-g2configtool
+# g2configtool
 
 ## Overview
 
@@ -218,7 +218,7 @@ see [Environment Variables](https://github.com/Senzing/knowledge-base/blob/main/
 
     ```console
     export GIT_ACCOUNT=senzing
-    export GIT_REPOSITORY=docker-g2configtool
+    export GIT_REPOSITORY=g2configtool
     export GIT_ACCOUNT_DIR=~/${GIT_ACCOUNT}.git
     export GIT_REPOSITORY_DIR="${GIT_ACCOUNT_DIR}/${GIT_REPOSITORY}"
     ```
@@ -230,7 +230,7 @@ see [Environment Variables](https://github.com/Senzing/knowledge-base/blob/main/
 1. **Option #1:** Using `docker` command and GitHub.
 
     ```console
-    sudo docker build --tag senzing/g2configtool https://github.com/senzing/docker-g2configtool.git#main
+    sudo docker build --tag senzing/g2configtool https://github.com/senzing/g2configtool.git#main
     ```
 
 1. **Option #2:** Using `docker` command and local repository.
