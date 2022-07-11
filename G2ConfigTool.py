@@ -4648,7 +4648,7 @@ if __name__ == '__main__':
 
     # Get the INI parameters to use
     iniParamCreator = G2IniParams()
-    g2module_params = iniParamCreator.getJsonINIParams(ini_file_name)
+    g2module_params = os.getenv("SENZING_ENGINE_CONFIGURATION_JSON", iniParamCreator.getJsonINIParams(ini_file_name))
 
     cmd_obj = G2CmdShell(g2module_params, args.histDisable, args.forceMode, args.fileToProcess)
 
