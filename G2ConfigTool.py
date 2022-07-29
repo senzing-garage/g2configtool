@@ -685,7 +685,7 @@ class G2CmdShell(cmd.Cmd, object):
                 return
 
         try:
-            self.cfgData = json.load(open(arg), encoding="utf-8")
+            self.cfgData = json.load(open(arg, encoding="utf-8"))
         except ValueError as e:
             print(f'\nERROR: {arg} doesn\'t appear to be valid JSON, configuration not imported!')
             print(f'ERROR: {e}\n')
