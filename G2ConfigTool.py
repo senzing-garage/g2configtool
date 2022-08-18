@@ -18,8 +18,6 @@ import subprocess
 
 try:
     import prettytable
-    from prettytable import PrettyTable
-    from prettytable import ALL as PRETTY_TABLE_ALL
     from prettytable import SINGLE_BORDER
 except (ImportError, ModuleNotFoundError):
     prettytable = None
