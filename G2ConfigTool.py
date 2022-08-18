@@ -52,25 +52,27 @@ class G2CmdShell(cmd.Cmd, object):
         if not args[0]:
             print(textwrap.dedent(f'''\
 
-                Senzing compares records within and across data sources.  Records consist of features and features have attributes.
-                For instance, the NAME feature has attributes such as NAME_FIRST and NAME_LAST, even NAME_ORG for an organization.
+            Senzing compares records within and across data sources.  Records consist of features and features have attributes.
+            For instance, the NAME feature has attributes such as NAME_FIRST and NAME_LAST for a person and NAME_ORG for an
+            organization.
 
-                Features are standardized, expressed in various ways to create candidate keys, and compared to see how close they
-                actually are.
+            Features are standardized and expressed in various ways to create candidate keys, and when candidates are found all
+            of their features are compared to the incoming record's features to see how close they actually are.
 
-                Finally, a set of rules or "principles" are applied to each candidate record's scores to see if the incoming record should resolve
-                to an existing entity or become a new one. In either case, the rules are also used to create relationships between entities.
+            Finally, a set of rules or "principles" are applied to each candidate record's feature scores to see if the incoming
+            record should resolve to an existing entity or become a new one. In either case, the rules are also used to create
+            relationships between entities.
 
-                This utility allows you to configure a Senzing instance. Type:
-                    help basic      <- for commonly used commands
-                    help features   <- to be used only with the guidance of Senzing support
-                    help principles <- to be used only with the guidance of Senzing support
-                    help all        <- to show all configurion commands
+            This utility allows you to configure a Senzing instance. Type:
+                help basic      <- for commonly used commands
+                help features   <- to be used only with the guidance of Senzing support
+                help principles <- to be used only with the guidance of Senzing support
+                help all        <- to show all configurion commands
 
-                To understand more about configuring Senzing, please review ...
-                    https://senzing.com/wp-content/uploads/Entity-Resolution-Processes-021320.pdf
-                    https://senzing.com/wp-content/uploads/Principle-Based-Entity-Resolution-092519.pdf
-                    https://senzing.zendesk.com/hc/en-us/articles/231925448-Generic-Entity-Specification-JSON-CSV-Mapping
+            To understand more about configuring Senzing, please review:
+                https://senzing.com/wp-content/uploads/Entity-Resolution-Processes-021320.pdf
+                https://senzing.com/wp-content/uploads/Principle-Based-Entity-Resolution-092519.pdf
+                https://senzing.zendesk.com/hc/en-us/articles/231925448-Generic-Entity-Specification-JSON-CSV-Mapping
 
             '''))
             return
@@ -113,20 +115,19 @@ class G2CmdShell(cmd.Cmd, object):
             or a physcal attribute (FME, FMES), it is best to clone an existing feature by doing a getFeature, then modifying the json payload to
             use it in an addFeature.
 
-                Here are the commands to add or update features ...
+                Here are the commands to add or update features:
                     listFeatures        <- to list all the features in the system
                     getFeature          <- get the json configuration for an existing feature
                     addFeature          <- add a new feature from a json document
-                    setFeature          <- to change a setting on an existing feature like ...
+                    setFeature          <- to change a setting on an existing feature like:
                                             - whether or not it is used for candidates
                                             - what its behavior is when evalated by the rules
                     deleteFeature       <- to delete a feature added by mistake
 
-
             Attributes are what you map your source data to.  If you add a new feature, you will also need to add attributes for it. Be sure to
             use a unique ID for attributes and to classify them as either an ATTRIBUTE or an IDENTIFIER.
 
-                Here are the commands to add or update attributes ...
+                Here are the commands to add or update attributes:
                     listAttributes
                     getAttribute
                     addAttribute
@@ -135,7 +136,7 @@ class G2CmdShell(cmd.Cmd, object):
             Some templates have been created to help you add new identifiers if needed. A template adds a feature and its required
             attributes with one command.
 
-                Here are the commands for using templates
+                Here are the commands for using templates:
                     templateAdd         <- add an identifier (F1) feature and attributes based on a template
                     templateAdd list    <- to see the list of available templates
 
@@ -153,17 +154,17 @@ class G2CmdShell(cmd.Cmd, object):
                     listFeatures            <- to see what features are used for candidates
                     setFeature              <- to toggle whether or not a feature is used for candidates
                     listExpressionCalls     <- to see what expressions are currently being created
-                    addToNamehash           <- to add to the name and ... keys
+                    addToNamehash           <- to add an element from another feature to the list of composite name keys
                     addExpressionCall       <- to add a new expression call, aka candidate key
                     listGenericThresholds   <- to see when candidate keys will become generic and are no longer used to find candidates
                     setGenericThreshold     <- to change when features with certain behaviors become generic
 
                 WARNING: The cost of raising generic thresholds is speed. It is always best to keep generic thresholds low and to add new
-                            new expressions instead.  You can add additional candidate keys to the name hash with the addToNameHash call
-                            command above or add new expressions by using the addExpressionCall command above.
+                            new expressions instead.  You can add additional composite keys addToNameHash call command above or add new
+                            expressions by using the addExpressionCall command above.
 
-            Once the candidate matches have been found, scoring and rule evaluation takes place next.  Scores are rolled up by behavior.
-            For instance, both addresses and phones have the behavior FF (Frequency Few). So if they both score above their scoring
+            Once the candidate matches have been found, scoring and rule evaluation takes place.  Scores are rolled up by behavior.
+            For instance, both addresses and phones have the behavior FF (Frequency Few). If they both score above their scoring
             function's close threshold, there would be two CLOSE_FFs (a fragment) which can be used in a rule such as NAME+CLOSE_FF.
 
                 These are the commands that help with configuring rules and scoring:
@@ -171,7 +172,6 @@ class G2CmdShell(cmd.Cmd, object):
                     listFragments           <- rules are combinations of fragments like close_name or same_
                     listFunctions           <- the comparison functions show you what is considered same, close, likely, etc.
                     listFeatures            <- shows you what comparison functions are assigned to what features
-
 
             '''))
 
@@ -189,15 +189,15 @@ class G2CmdShell(cmd.Cmd, object):
         cmd.Cmd.__init__(self)
 
         # Cmd Module settings
-        self.intro = '\nType help or ? to list commands.\n'
+        self.intro = ''
         self.prompt = '(g2cfg) '
         self.ruler = '-'
         self.doc_header = 'Configuration Command List'
         self.misc_header = 'Help Topics (help <topic>)'
         self.undoc_header = 'Misc Commands'
         self.__hidden_methods = ('do_shell', 'do_EOF', 'do_help',
-                                 'do_addEntityClass', 'do_deleteEntityClass',
-                                 'foo')
+                                 'do_addEntityClass', 'do_deleteEntityClass', 'do_listEntityClasses',
+                                 'do_addEntityType', 'do_deleteEntityType', 'do_listEntityTypes')
 
 
         self.g2_configmgr = G2ConfigMgr()
@@ -829,7 +829,7 @@ class G2CmdShell(cmd.Cmd, object):
                 return
 
         try:
-            self.cfgData = json.load(open(arg), encoding="utf-8")
+            self.cfgData = json.load(open(arg, encoding="utf-8"))
         except ValueError as e:
             print(f'\nERROR: {arg} doesn\'t appear to be valid JSON, configuration not imported!')
             print(f'ERROR: {e}\n')
@@ -1954,12 +1954,12 @@ class G2CmdShell(cmd.Cmd, object):
 
             The best way to add a feature is to do a templateAdd as it adds both the feature and its attributes.
 
-            If you need to add one manually, it is best to clone an existing one by doing a getFeature on one like it,
-            and editing its json configuration in your favorite editor.  You will need to at least change its "id" and
-            "feature" code so they are unique, but you can change anything else you like.  Then when you are ready, use
-            it as the addRecord <json configuration>.
+            If you need to add a feature manually, it is recommended to clone an existing one that is similar to the
+            one you want to add.  You can do this by doing a getFeature on the existing one and editing the json in
+            your favorite editor.   You will need to at least change its "id" and "feature" code so they are unique,
+            but you can change anything else you like.  Then when you are ready, use it as the addFeature <json payload>.
 
-            And don't forget to add the attributes for its elements using the addAttribute command!
+            Don't forget you will also need to add attributes for its elements using the addAttribute command!
         '''
 
         if not argCheck('addFeature', arg, self.do_addFeature.__doc__):
@@ -2303,7 +2303,6 @@ class G2CmdShell(cmd.Cmd, object):
         Notes:
             This command appends an attribute from another feature to the name hash.  In the example above, the street number
             computed by the address parser will be added to the list of composite keys created from name.
-
         '''
 
         if not argCheck('addToNamehash', arg, self.do_addToNamehash.__doc__):
