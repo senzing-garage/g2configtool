@@ -960,7 +960,7 @@ class G2CmdShell(cmd.Cmd, object):
     def do_listDataSources(self, arg):
         '''
         Syntax:
-            listDataSources <optionalFilter> <optionalParameter>
+            listDataSources [filter] [parameter]
 
         Examples:
             listDataSources             <-to list all dataSources in json format
@@ -1234,7 +1234,7 @@ class G2CmdShell(cmd.Cmd, object):
     def do_listFunctions(self, arg):
         '''
         Syntax:
-            listFunctions <optionalFilter> <optionalParameter>
+            listFunctions [filter] [parameter]
 
         Examples:
             listFunctions             <-to list all functions in json format
@@ -1294,7 +1294,7 @@ class G2CmdShell(cmd.Cmd, object):
     def do_listFeatures(self, arg):
         '''
         Syntax:
-            listFeatures <optionalFilter> <optionalParameter>
+            listFeatures [filter] [parameter]
 
         Examples:
             listFeatures             <-to list all features in json format
