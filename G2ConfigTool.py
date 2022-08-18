@@ -14,15 +14,13 @@ import textwrap
 import traceback
 from collections import OrderedDict
 from contextlib import suppress
-from datetime import datetime
-from shutil import copyfile
 import subprocess
 
 try:
     import prettytable
     from prettytable import PrettyTable
     from prettytable import ALL as PRETTY_TABLE_ALL
-    from prettytable import SINGLE_BORDER, DOUBLE_BORDER, MARKDOWN, ORGMODE
+    from prettytable import SINGLE_BORDER
 except (ImportError, ModuleNotFoundError):
     prettytable = None
 
@@ -50,7 +48,7 @@ class G2CmdShell(cmd.Cmd, object):
 
     def do_help(self, *args):
         if not args[0]:
-            print(textwrap.dedent(f'''\
+            print(textwrap.dedent('''\
 
             Senzing compares records within and across data sources.  Records consist of features and features have attributes.
             For instance, the NAME feature has attributes such as NAME_FIRST and NAME_LAST for a person and NAME_ORG for an
@@ -78,7 +76,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         if args[0].upper() == 'BASIC':
-            print(textwrap.dedent(f'''\
+            print(textwrap.dedent('''\
 
             Senzing comes pre-configured with all the settings needed to resolve persons and organizations.  Usually all that is required
             is for you to register your data sources and start loading data based on the Generic Entity Specification.
@@ -108,7 +106,7 @@ class G2CmdShell(cmd.Cmd, object):
             '''))
 
         elif args[0].upper() in ('FEATURE', 'FEATURES'):
-            print(textwrap.dedent(f'''\
+            print(textwrap.dedent('''\
 
             New features and their attributes are rarely needed.  But when they are they are usually industry specific
             identifiers (F1s) like medicare_provider_id or swift_code for a bank.  If you want some other kind of attribute like a grouping (FF)
@@ -143,7 +141,7 @@ class G2CmdShell(cmd.Cmd, object):
             '''))
 
         elif args[0].upper() in ('PRINCIPLE', 'PRINCIPLES'):
-            print(textwrap.dedent(f'''\
+            print(textwrap.dedent('''\
 
             Before the principles are applied, the features and expressions created for incoming records are used to find candidates.
             An example of an expression is name and DOB and there is an expression call on the feature "name" to automatically create it
