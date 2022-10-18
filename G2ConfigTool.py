@@ -4134,7 +4134,7 @@ class G2CmdShell(cmd.Cmd, object):
                                         'CANDIDATES': ['No'],
                                         'STANDARDIZE': ['PARSE_ID'],
                                         'EXPRESSION': ['EXPRESS_ID'],
-                                        'COMPARISON': ['EXACT_COMP'],
+                                        'COMPARISON': ['ID_COMP'],
                                         'FEATURE_CLASS': 'ISSUED_ID',
                                         'ATTRIBUTE_CLASS': 'IDENTIFIER',
                                         'ELEMENTS': [{'element': 'ACCT_NUM', 'expressed': 'Yes', 'compared': 'Yes', 'display': 'Yes'},
