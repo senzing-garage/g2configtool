@@ -4129,19 +4129,6 @@ class G2CmdShell(cmd.Cmd, object):
                                         'ATTRIBUTES': [{'attribute': '<feature>_NUMBER', 'element': 'ID_NUM', 'required': 'Yes'},
                                                        {'attribute': '<feature>_COUNTRY', 'element': 'COUNTRY', 'required': 'No'}]}
 
-        validTemplates['ACCOUNT_ID'] = {'DESCRIPTION': 'account issued identifier (like a credit card)',
-                                        'BEHAVIOR': ['F1', 'F1E', 'F1ES', 'A1', 'A1E', 'A1ES'],
-                                        'CANDIDATES': ['No'],
-                                        'STANDARDIZE': ['PARSE_ID'],
-                                        'EXPRESSION': ['EXPRESS_ID'],
-                                        'COMPARISON': ['ID_COMP'],
-                                        'FEATURE_CLASS': 'ISSUED_ID',
-                                        'ATTRIBUTE_CLASS': 'IDENTIFIER',
-                                        'ELEMENTS': [{'element': 'ACCT_NUM', 'expressed': 'Yes', 'compared': 'Yes', 'display': 'Yes'},
-                                                     {'element': 'ACCT_DOMAIN', 'expressed': 'No', 'compared': 'yes', 'display': 'Yes'}],
-                                        'ATTRIBUTES': [{'attribute': '<feature>_NUMBER', 'element': 'ACCT_NUM', 'required': 'Yes'},
-                                                       {'attribute': '<feature>_DOMAIN', 'element': 'ACCT_DOMAIN', 'required': 'No'}]}
-
         if arg and arg.upper() == 'LIST':
             print()
             for template in validTemplates:
