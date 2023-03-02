@@ -8,7 +8,6 @@ import os
 import pathlib
 import platform
 import re
-import shlex
 import sys
 import textwrap
 import traceback
@@ -186,16 +185,15 @@ def colorize_msg(msg_text, msg_type_or_color = ''):
     print(f"\n{Colors.apply(msg_text, msg_color)}\n")
 
 def colorize_json(json_str):
-    for token in re.findall(r'"(.*?)"', json_str):
+    for token in set(re.findall(r'"(.*?)"', json_str)):
         tag = f'"{token}":'
         if tag in json_str:
-            json_str = json_str.replace(tag, colorize(tag, 'highlight2'))
+            json_str = json_str.replace(tag, colorize(tag, 'attr_color'))
         else:
             tag = f'"{token}"'
             if tag in json_str:
                 json_str = json_str.replace(tag, colorize(tag, 'dim'))
     return json_str
-
 
 # ===== main class =====
 
@@ -236,7 +234,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         self.attributeClassList = ('NAME', 'ATTRIBUTE', 'IDENTIFIER', 'ADDRESS', 'PHONE', 'RELATIONSHIP', 'OTHER')
         self.lockedFeatureList = ('NAME', 'ADDRESS', 'PHONE', 'DOB', 'REL_LINK', 'REL_ANCHOR', 'REL_POINTER')
-        self.behavior_sort_order = ['NAME','A1','A1E','A1ES','F1','F1E','F1ES','FF','FFE','FFES','FM','FME','FMES','FVM','FVME','FVMES']
+        self.valid_behavior_codes = ['NAME','A1','A1E','A1ES','F1','F1E','F1ES','FF','FFE','FFES','FM','FME','FMES','FVM','FVME','FVMES']
 
         self.doDebug = debug
 
@@ -271,7 +269,7 @@ class G2CmdShell(cmd.Cmd, object):
                 if getattr(self, func_name).__doc__:
                     help_lines = textwrap.dedent(getattr(self, func_name).__doc__).split('\n')
                     help_text = ''
-                    headers = ['Syntax:', 'Examples:', 'Notes:', 'Caution:']
+                    headers = ['Syntax:', 'Examples:', 'Example:', 'Notes:', 'Caution:']
                     current_section = ''
                     for line in help_lines:
                         line_color = ''
@@ -284,7 +282,7 @@ class G2CmdShell(cmd.Cmd, object):
                         elif line:
                             if current_section == 'Caution:':
                                 line_color = 'caution'
-                            elif current_section not in ('Syntax:', 'Examples:'):
+                            elif current_section not in ('Syntax:', 'Examples:', 'Example:'):
                                 line_color = 'dim'
                         help_text += colorize(line, line_color) + '\n'
                     print(help_text)
@@ -636,11 +634,12 @@ class G2CmdShell(cmd.Cmd, object):
             self.g2_configmgr.destroy()
             self.g2_config.destroy()
 
-    def loadConfig(self):
+    def loadConfig(self, defaultConfigID = None):
 
         # Get the current configuration from the Senzing database
-        defaultConfigID = bytearray()
-        self.g2_configmgr.getDefaultConfigID(defaultConfigID)
+        if not defaultConfigID:
+            defaultConfigID = bytearray()
+            self.g2_configmgr.getDefaultConfigID(defaultConfigID)
 
         # If a default config isn't found, create a new default configuration
         if not defaultConfigID:
@@ -692,7 +691,7 @@ class G2CmdShell(cmd.Cmd, object):
                         self.do_save(self)
                         break
 
-                if input('\nAre you sure you want to exit? (y/n) ').upper().startwith('Y'):
+                if input('\nAre you sure you want to exit? (y/n) ').upper().startswith('Y'):
                     break
                 else:
                     print()
@@ -802,6 +801,134 @@ class G2CmdShell(cmd.Cmd, object):
         print(f'\n{output}\n')
 
 
+# ===== whole configuration =====
+
+    def do_getDefaultConfigID(self, arg):
+        """
+        Returns the the current configuration ID
+
+        Syntax:
+            getDefaultConfigID
+        """
+        response = bytearray()
+        try:
+            self.g2_configmgr.getDefaultConfigID(response)
+            colorize_msg(f"The default config ID is: {response.decode()}")
+        except G2Exception as err:
+            colorize_msg(err, 'error')
+
+    def do_getConfigList(self, arg):
+        """
+        Returns the list of all known configurations
+
+        Syntax:
+            getConfigList [optional_output_format]
+        """
+        arg = self.check_arg_for_get_format(arg)
+        try:
+            response = bytearray()
+            self.g2_configmgr.getConfigList(response)
+            self.print_json_record(response.decode())
+        except G2Exception as err:
+            colorize_msg(err, 'error')
+
+    def do_getConfigTable(self, arg):
+        """
+        Returns the json configuration for a specific desired configuration table
+
+        Syntax:
+            getConfigTable [table name]
+
+        Examples:
+            getConfigTable CFG_CFUNC
+
+        Caution:
+            These listings will only be understood by Senzing engineers
+        """
+        arg = self.check_arg_for_list_format(arg) # checking for list here even though a get as it
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        if self.cfgData["G2_CONFIG"].get(arg):
+            self.print_json_lines(self.cfgData["G2_CONFIG"][arg])
+        else:
+            colorize_msg(f'Config table {arg} not found!', 'error')
+
+    def do_reloadConfig(self, arg):
+        """
+        Reload the configuration, abandoning any changes
+
+        Syntax:
+            configReload
+        """
+        if self.configUpdated:
+            if not input('\nYou have unsaved changes, are you sure you want to discard them? (y/n) ').upper().startswith('Y'):
+                colorize_msg('Your changes have not been overwritten', 'info')
+                return
+            self.loadConfig()
+            self.configUpdated = False
+            colorize_msg('Config has been reloaded', 'success')
+        else:
+            colorize_msg('Config has not been updated', 'warning')
+
+    def do_exportToFile(self, arg):
+        """
+        Export the current configuration data to a file
+
+        Examples:
+            exportToFile [fileName] [optional_config_id]
+
+        Notes:
+            You can export any prior config_id from the getConfigList command by specifying it after the fileName
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        arg_list = arg.split()
+        fileName = arg_list[0]
+
+        if len(arg_list) == 1:
+            json_data = self.cfgData
+        else:
+            config_id = arg_list[1]
+            try:
+                response = bytearray()
+                self.g2_configmgr.getConfig(config_id, response)
+                json_data = json.loads(response.decode())
+            except G2Exception as err:
+                colorize_msg(err, 'error')
+                return
+        try:
+            with open(fileName, 'w') as fp:
+                json.dump(json_data, fp, indent=4, sort_keys=True)
+        except OSError as err:
+            colorize_msg(err, 'error')
+        else:
+            colorize_msg('Successfully exported!', 'success')
+
+    def do_importFromFile(self, arg):
+        """
+        Import the config from a file
+
+        Examples:
+            importFromFile [fileName]
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        if self.configUpdated:
+            if not input('\nYou have unsaved changes, are you sure you want to discard them? (y/n) ').upper().startswith('Y'):
+                return
+        try:
+            self.cfgData = json.load(open(arg, encoding="utf-8"))
+        except ValueError as err:
+            colorize_msg(err, 'error')
+        else:
+            colorize_msg('Successfully imported!', 'success')
+
+
 # ===== settings section =====
 
     def do_setGetFormat(self, arg):
@@ -855,270 +982,10 @@ class G2CmdShell(cmd.Cmd, object):
                 new_arg.append(token)
         return ' '.join(new_arg)
 
-# ===== whole configuration section =====
 
-    def do_listConfigs(self, arg):
-        """
-        Returns the list of all known configurations
-
-        Syntax:
-            getConfigList
-        """
-        try:
-            response = bytearray()
-            self.g2_configmgr.getConfigList(response)
-            self.print_json_record(response)
-        except G2Exception as err:
-            colorize_msg(err, 'error')
-
-    def do_getConfig(self, arg):
-        """
-        Returns the json configuration document for a specific configuration ID
-
-        Syntax:
-            getConfig [configID]
-        """
-        try:
-            args = self.parser.parse_args(['getConfig'] + parse(arg))
-        except SystemExit:
-            print(self.do_getConfig.__doc__)
-            return
-        try:
-            response = bytearray()
-            self.g2_configmgr.getConfig(args.configID, response)
-            self.print_json_record(response)
-        except G2Exception as err:
-            colorize_msg(err, 'error')
-
-    def do_getConfigSection(self, arg):
-        """
-        Returns the json configuration for the desired section
-
-        Examples:
-            getConfigSection CFG_CFUNC
-        """
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        if self.cfgData["G2_CONFIG"].get(arg):
-            self.print_json_record(json.dumps(self.cfgData["G2_CONFIG"][arg]))
-        else:
-            colorize_msg(f'{arg} not found', 'error')
-
-    def do_getDefaultConfigID(self, arg):
-        """
-        Returns the the current configuration ID
-
-        Syntax:
-            getDefaultConfigID
-        """
-        response = bytearray()
-        try:
-            self.g2_configmgr.getDefaultConfigID(response)
-            printResponse(response)
-        except G2Exception as err:
-            print_messsage(err, 'error')
-
-    def do_configReload(self, arg):
-        """
-        Reload the configuration, abandoning any changes
-
-        Syntax:
-            configReload
-        """
-        if self.configUpdated:
-            if input('\nYou have unsaved changes, are you sure you want to discard them? (y/n) ').upper().startswith('Y'):
-                colorize_msg('Your changes were not saved', 'warning')
-                return
-
-        self.loadConfig()
-        self.configUpdated = False
-        colorize_msg('Config has been reloaded', 'success')
-
-    # Compatibility version commands
-
-    def do_verifyCompatibilityVersion(self, arg):
-        """
-        Verify if the current configuration is compatible with a specific version number
-
-        Examples:
-            verifyCompatibilityVersion {"expectedVersion": "2"}
-        """
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Invalid parameter: {err}', 'error')
-            return
-
-        this_version = self.cfgData['G2_CONFIG']['CONFIG_BASE_VERSION']['COMPATIBILITY_VERSION']['CONFIG_VERSION']
-        if this_version != parmData['EXPECTEDVERSION']:
-            colorize_msg(f"Incompatible! This is version {this_version}", 'error')
-            if self.isInteractive is False:
-                raise Exception('Incorrect compatibility version.')
-        else:
-            colorize_msg(f"This version is compatible", 'success')
-
-    def do_updateCompatibilityVersion(self, arg):
-        """
-        Update the compatiblilty version of this configuration
-
-        Examples:
-            updateCompatibilityVersion {"fromVersion": "1", "toVersion": "2"}
-        """
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Invalid parameter: {err}', 'error')
-            return
-
-        this_version = self.cfgData['G2_CONFIG']['CONFIG_BASE_VERSION']['COMPATIBILITY_VERSION']['CONFIG_VERSION']
-        if this_version != parmData['FROMVERSION']:
-            colorize_msg(f"From version mismatch. This is version {this_version}", 'error')
-            return
-
-        self.cfgData['G2_CONFIG']['CONFIG_BASE_VERSION']['COMPATIBILITY_VERSION']['CONFIG_VERSION'] = parmData['TOVERSION']
-        self.configUpdated = True
-        colorize_msg('Compatibility version successfully changed!', 'success')
-
-    def do_getCompatibilityVersion(self, arg):
-        """
-        Retrive the compatiblity version of this configuration
-
-        Syntax:
-            getCompatibilityVersion
-        """
-        try:
-            this_version = self.cfgData['G2_CONFIG']['CONFIG_BASE_VERSION']['COMPATIBILITY_VERSION']['CONFIG_VERSION']
-            colorize_msg(f'Compatibility version is {this_version}', 'success')
-        except KeyError:
-            colorize_msg('Could not retrieve compatibility version', 'error')
-
-    # configuration sections
-
-    def do_addConfigSection(self, arg):
-        """
-        Add a whole new configuration section
-
-        Syntax:
-            addConfigSection {"section": "<configSection_name>"}
-
-        Caution:
-            This command should only be performed by a senzing engineer
-        """
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['SECTION'] = parmData['SECTION'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Invalid parameter: {err}', 'error')
-            return
-
-        if parmData['SECTION'] in self.cfgData['G2_CONFIG']:
-            colorize_msg('Section name already exists!', 'error')
-            return
-
-        self.cfgData['G2_CONFIG'][parmData['SECTION']] = []
-        self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
-
-    def do_addConfigSectionField(self, arg):
-        """
-        Add a field to a configuration section
-
-        Syntax:
-            addConfigSectionField {"section": "<section_name>","field": "<field_name>","value": "<field_value>"}
-
-        Warnings:
-            This command should only be performed by a senzing engineer
-        """
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            if 'SECTION' not in parmData or len(parmData['SECTION']) == 0:
-                raise ValueError('Config section name is required!')
-            parmData['SECTION'] = parmData['SECTION'].upper()
-            if 'FIELD' not in parmData or len(parmData['FIELD']) == 0:
-                raise ValueError('Field name is required!')
-            parmData['FIELD'] = parmData['FIELD'].upper()
-            if 'VALUE' not in parmData:
-                raise ValueError('Field value is required!')
-            parmData['VALUE'] = parmData['VALUE']
-
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Invalid parameter: {err}', 'error')
-            return
-
-        if not parmData['SECTION'] in self.cfgData['G2_CONFIG']:
-            colorize_msg('Section name does not exist!', 'error')
-            return
-
-        for i in range(len(self.cfgData['G2_CONFIG'][parmData['SECTION']])):
-            if parmData['FIELD'] in self.cfgData['G2_CONFIG'][parmData['SECTION']][i]:
-                colorize_msg('Field name already exists!', 'error')
-                return
-
-        for i in range(len(self.cfgData['G2_CONFIG'][parmData['SECTION']])):
-            self.cfgData['G2_CONFIG'][parmData['SECTION']][i][parmData['FIELD']] = parmData['VALUE']
-
-        self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
-
-    # import/export
-
-    def do_exportToFile(self, arg):
-        """
-        Export the config to a file
-
-        Examples:
-            exportToFile [fileName]
-        """
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-        try:
-            with open(arg, 'w') as fp:
-                json.dump(self.cfgData, fp, indent=4, sort_keys=True)
-        except OSError as err:
-            colorize_msg(err, 'error')
-        else:
-            colorize_msg('Successfully exported!', 'success')
-
-    def do_importFromFile(self, arg):
-        """
-        Import the config from a file
-
-        Examples:
-            importFromFile [fileName]
-        """
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-        if self.configUpdated:
-            if not input('\nYou have unsaved changes, are you sure you want to discard them? (y/n) ').upper().startswith('Y'):
-                return
-        try:
-            self.cfgData = json.load(open(arg, encoding="utf-8"))
-        except ValueError as err:
-            colorize_msg(err, 'error')
-        else:
-            colorize_msg('Successfully imported!', 'success')
-
-    # support for getting records
+# ===== code lookups and validations =====
 
     def getRecord(self, table, field, value):
-
         for i in range(len(self.cfgData['G2_CONFIG'][table])):
             if type(field) == list:
                 matched = True
@@ -1134,7 +1001,6 @@ class G2CmdShell(cmd.Cmd, object):
         return None
 
     def getRecordList(self, table, field=None, value=None):
-
         recordList = []
         for i in range(len(self.cfgData['G2_CONFIG'][table])):
             if field and value:
@@ -1144,6 +1010,85 @@ class G2CmdShell(cmd.Cmd, object):
                 recordList.append(self.cfgData['G2_CONFIG'][table][i])
         return recordList
 
+    def getNextRecordId(self, table, field, value):
+        id_taken = False
+        last_id = 1000
+        for i in range(len(self.cfgData['G2_CONFIG'][table])):
+            if value and self.cfgData['G2_CONFIG'][table][i][field] == value:
+                id_taken = True
+            if self.cfgData['G2_CONFIG'][table][i][field] > last_id:
+                last_id = self.cfgData['G2_CONFIG'][table][i][field]
+        return value if value > 0 and not id_taken else last_id + 1
+
+    def lookupDatasource(self, dataSource):
+        dsrcRecord = self.getRecord('CFG_DSRC', 'DSRC_CODE', dataSource)
+        if dsrcRecord:
+            return dsrcRecord, f'Data source "{dataSource}" already exists!'
+        return None, f'Data source "{dataSource}" does not exist!'
+
+    def lookupFeature(self, feature):
+        ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', feature)
+        if ftypeRecord:
+            return ftypeRecord, f'Feature "{feature}" already exists!'
+        return None, f'Feature "{feature}" does not exist!'
+
+    def lookupElement(self, element):
+        felemRecord = self.getRecord('CFG_FELEM', 'ELEM_CODE', element)
+        if felemRecord:
+            return felemRecord, f'Element "{element}" already exists!'
+        return None, f'Element "{element}" does not exist!'
+
+    def lookupFeatureElement(self, feature, element):
+        ftypeRecord, error_text = self.lookupFeature(feature)
+        if not ftypeRecord:
+            return None, error_text
+        else:
+            felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', element)
+            if felemRecord:
+                fbomRecord = self.getRecord('CFG_FBOM', ['FTYPE_ID', 'FELEM_ID'], [ftypeRecord['FTYPE_ID'], felemRecord['FELEM_ID']])
+                if fbomRecord:
+                    return fbomRecord, None
+            return None, f'{element} is not a valid feature element! use command "getFeature {feature}" to see its elements'
+
+    def lookupFeatureClass(self, featureClass):
+        fclassRecord = self.getRecord('CFG_FCLASS', 'FCLASS_CODE', featureClass)
+        if fclassRecord:
+            return fclassRecord, f'Feature class "{featureClass}" is valid!"'
+        else:
+            return False, f'Feature class "{featureClass}" is not valid! use command "listReferenceCodes featureClass" to see the list'
+
+    def lookupBehaviorCode(self, behaviorCode):
+        if behaviorCode in self.valid_behavior_codes:
+            return parseFeatureBehavior(behaviorCode), f'Behavior code "{behaviorCode}" is valid!"'
+        else:
+            return False, f'Behavior code "{behaviorCode}" is not valid! use command "listReferenceCodes behaviorCodes" to see the list'
+
+    def lookupStandardizeFunction(self, standardizeFunction):
+        funcRecord = self.getRecord('CFG_SFUNC', 'SFUNC_CODE', standardizeFunction)
+        if funcRecord:
+            return funcRecord, f'Standardize function "{standardizeFunction}" is valid!"'
+        else:
+            return False, f'Standardize function "{standardizeFunction}" is not valid! use command "listStandardizeFunctions" to see the list'
+
+    def lookupExpressionFunction(self, expressionFunction):
+        funcRecord = self.getRecord('CFG_EFUNC', 'EFUNC_CODE', expressionFunction)
+        if funcRecord:
+            return funcRecord, f'Expression function "{expressionFunction}" is valid!"'
+        else:
+            return False, f'Expression function "{expressionFunction}" is not valid! use command "listExpressionFunctions" to see the list'
+
+    def lookupComparisonFunction(self, comparisonFunction):
+        funcRecord = self.getRecord('CFG_CFUNC', 'CFUNC_CODE', comparisonFunction)
+        if funcRecord:
+            return funcRecord, f'Comparison function "{comparisonFunction}" is valid!"'
+        else:
+            return False, f'Comparison function "{comparisonFunction}" is not valid! use command "listComparisonFunctions" to see the list'
+
+    def validateDomain(self, attr, value, domain_list):
+        if value in domain_list:
+            return True, f'{attr} value is valid!'
+        else:
+            return False, f'{attr} value must be in {json.dumps(domain_list)}'
 
 # ===== data Source commands =====
 
@@ -1173,33 +1118,33 @@ class G2CmdShell(cmd.Cmd, object):
             addDataSource CUSTOMER
 
         Caution:
-            dataSourceCodes will automatically be converted to upper case
+            dataSource codes will automatically be converted to upper case
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"DATASOURCE": arg}
+            parmData['ID'] = int(parmData.get('ID', 0))
             parmData['DATASOURCE'] = parmData['DATASOURCE'].upper()
         except (ValueError, KeyError) as err:
             colorize_msg(f'Invalid parameter: {err}', 'error')
             return
 
-        maxID = 0
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_DSRC'])):
-            if self.cfgData['G2_CONFIG']['CFG_DSRC'][i]['DSRC_CODE'] == parmData['DATASOURCE']:
-                colorize_msg(f"Data source {parmData['DATASOURCE']} already exists!", 'caution')
-                return
-            if 'ID' in parmData and self.cfgData['G2_CONFIG']['CFG_DSRC'][i]['DSRC_ID'] == parmData['ID']:
-                colorize_msg(f"Data source ID {parmData['ID']} already exists!", 'caution')
-                return
-            if self.cfgData['G2_CONFIG']['CFG_DSRC'][i]['DSRC_ID'] > maxID:
-                maxID = self.cfgData['G2_CONFIG']['CFG_DSRC'][i]['DSRC_ID']
-        if 'ID' not in parmData:
-            parmData['ID'] = maxID + 1 if maxID >= 1000 else 1000
+        dsrcRecord, message = self.lookupDatasource(parmData['DATASOURCE'])
+        if dsrcRecord:
+            colorize_msg(message, 'warning')
+            return
+
+        next_id = self.getNextRecordId('CFG_DSRC', 'DSRC_ID', parmData['ID'])
+        if next_id != parmData['ID']:
+            colorize_msg('The specified ID is already taken! Remove it to assign the next available', 'error')
+            return
+        else:
+            parmData['ID'] = next_id
 
         newRecord = {}
-        newRecord['DSRC_ID'] = int(parmData['ID'])
+        newRecord['DSRC_ID'] = parmData['ID']
         newRecord['DSRC_CODE'] = parmData['DATASOURCE']
         newRecord['DSRC_DESC'] = parmData['DATASOURCE']
         newRecord['DSRC_RELY'] = 1
@@ -1238,17 +1183,13 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Cannot delete the SEARCH data source', 'error')
             return
 
-        deleteCnt = 0
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_DSRC']) - 1, -1, -1):
-            if self.cfgData['G2_CONFIG']['CFG_DSRC'][i]['DSRC_CODE'] == parmData['DATASOURCE']:
-                del self.cfgData['G2_CONFIG']['CFG_DSRC'][i]
-                deleteCnt += 1
-                self.configUpdated = True
+        dsrcRecord, message = self.lookupDatasource(parmData['DATASOURCE'])
+        if not dsrcRecord:
+            colorize_msg(message, 'warning')
 
-        if deleteCnt == 0:
-            colorize_msg('Data source not found!', 'caution')
-        else:
-            colorize_msg(f'Successfully deleted!', 'success')
+        self.cfgData['G2_CONFIG']['CFG_DSRC'].remove(dsrcRecord)
+        colorize_msg(f'Successfully deleted!', 'success')
+        self.configUpdated = True
 
 # ===== feature commands =====
 
@@ -1264,7 +1205,7 @@ class G2CmdShell(cmd.Cmd, object):
         cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_ID', cfcallRecord['CFUNC_ID']) if cfcallRecord else None
 
         jsonString = '{'
-        jsonString += '"id": "%s"' % ftypeRecord['FTYPE_ID']
+        jsonString += '"id": %s' % ftypeRecord['FTYPE_ID']
         jsonString += ', "feature": "%s"' % ftypeRecord['FTYPE_CODE']
         jsonString += ', "class": "%s"' % fclassRecord['FCLASS_CODE'] if fclassRecord else 'OTHER'
         jsonString += ', "behavior": "%s"' % getFeatureBehavior(ftypeRecord)
@@ -1273,6 +1214,7 @@ class G2CmdShell(cmd.Cmd, object):
         jsonString += ', "standardize": "%s"' % (sfuncRecord['SFUNC_CODE'] if sfuncRecord else '')
         jsonString += ', "expression": "%s"' % (efuncRecord['EFUNC_CODE'] if efuncRecord else '')
         jsonString += ', "comparison": "%s"' % (cfuncRecord['CFUNC_CODE'] if cfuncRecord else '')
+        jsonString += ', "matchKey": "%s"' % ftypeRecord['SHOW_IN_MATCH_KEY']
 
         elementList = []
         fbomRecordList = self.getRecordList('CFG_FBOM', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
@@ -1299,25 +1241,7 @@ class G2CmdShell(cmd.Cmd, object):
         jsonString += ', "elementList": %s' % json.dumps(elementList)
         jsonString += '}'
 
-        return jsonString
-
-    def do_listFeatureClasses(self, arg):
-        """
-        Returns the list of feature classes
-
-        Syntax:
-            listFeatureClasses [optional_search_filter]
-
-        Notes:
-            Feature classes just provide a grouping for features and have no impact on resolution.
-        """
-        arg = self.check_arg_for_list_format(arg)
-        json_lines = []
-        for fclassRecord in sorted(self.getRecordList('CFG_FCLASS'), key=lambda k: k['FCLASS_ID']):
-            if arg and arg.lower() not in str(fclassRecord).lower():
-                continue
-            json_lines.append({"id": fclassRecord['FCLASS_ID'], "class": fclassRecord['FCLASS_CODE']})
-        self.print_json_lines(json_lines)
+        return json.loads(jsonString)
 
     def do_listFeatures(self, arg):
         """
@@ -1330,9 +1254,9 @@ class G2CmdShell(cmd.Cmd, object):
         json_lines = []
         for ftypeRecord in sorted(self.getRecordList('CFG_FTYPE'), key=lambda k: k['FTYPE_ID']):
             featureJson = self.getFeatureJson(ftypeRecord)
-            if arg and arg.lower() not in featureJson.lower():
+            if arg and arg.lower() not in str(featureJson.lower()):
                 continue
-            json_lines.append(json.loads(featureJson))
+            json_lines.append(featureJson)
         self.print_json_lines(json_lines)
 
     def do_getFeature(self, arg):
@@ -1356,11 +1280,11 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Invalid parameter: {err}', 'error')
             return
 
-        ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-        if not ftypeRecord:
-            colorize_msg('Feature not found', 'error')
+        ftypeRecord, errorText = self.lookupFeature(parmData['FEATURE'])
+        if ftypeRecord:
+            self.print_json_record(self.getFeatureJson(ftypeRecord))
         else:
-            self.print_json_record(json.loads(self.getFeatureJson(ftypeRecord)))
+            colorize_msg(errorText, 'error')
 
     def do_addFeature(self, arg):
         """
@@ -1369,22 +1293,19 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             addFeature [json configuration]
 
+        Examples:
+            see listFeatures or getFeature [feature] for examples
+
         Notes:
-            The best way to add a feature is to do a templateAdd as it adds both the feature and its attributes.
-
-            If you need to add a feature manually, it is recommended to clone an existing one that is similar to the
-            one you want to add.  You can do this by doing a getFeature on the existing one and editing the json in
-            your favorite editor.   You will need to at least change its "id" and "feature" code so they are unique,
-            but you can change anything else you like.
-
-        Caution:
-            Don't forget you will also need to add attributes for the feature elements using the addAttribute command!
+            The best way to add a feature is via templateAdd as it adds both the feature and its attributes.
+            If you add a feature manually, you will also have to manually add attributes for it!
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
+            parmData['ID'] = int(parmData.get('ID', 0))
             parmData['FEATURE'] = parmData['FEATURE'].upper()
             if 'ELEMENTLIST' not in parmData or len(parmData['ELEMENTLIST']) == 0:
                 raise ValueError('An element list is required!')
@@ -1394,76 +1315,84 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Invalid parameter: {err}', 'error')
             return
 
-
         # lookup feature and error if already exists
-        maxID = 0
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_FTYPE'])):
-            if self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_CODE'] == parmData['FEATURE']:
-                colorize_msg('Feature already exists!', 'caution')
-                return
-            if 'ID' in parmData and int(self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']) == int(
-                    parmData['ID']):
-                colorize_msg('Feature id already exists!', 'caution')
-                return
-            if self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID'] > maxID:
-                maxID = self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']
+        ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
+        if ftypeRecord:
+            colorize_msg(message, 'warning')
+            return
 
-        if 'ID' in parmData:
-            ftypeID = int(parmData['ID'])
+        next_id = self.getNextRecordId('CFG_FTYPE', 'FTYPE_ID', parmData['ID'])
+        if next_id != parmData['ID']:
+            colorize_msg('The specified ID is already taken! Remove it to assign the next available', 'error')
+            return
         else:
-            ftypeID = maxID + 1 if maxID >= 1000 else 1000
+            parmData['ID'] = next_id
 
-        # default for missing values
+        ftypeID = parmData['ID']
         parmData['ID'] = ftypeID
         parmData['CLASS'] = parmData.get('CLASS', 'OTHER').upper()
         parmData['BEHAVIOR'] = parmData.get('BEHAVIOR', 'FM').upper()
-        parmData['ANONYMIZE'] = parmData.get('ANONYMIZE','NO').upper()
-        parmData['DERIVED'] = parmData.get('DERIVED', 'NO').upper()
-        parmData['DERIVATION'] = parmData.get('DERIVATION')
-        parmData['CANDIDATES'] = parmData.get('CANDIDATES', 'NO' if parmData['BEHAVIOR'] == 'FM' else 'YES').upper()
 
-        # parse behavior
-        featureBehaviorDict = parseFeatureBehavior(parmData['BEHAVIOR'])
-        if not featureBehaviorDict:
-            colorize_msg(f"{parmData['BEHAVIOR']} is not a valid behavior", 'error')
+        parmData['CANDIDATES'], message = self.validateDomain('Candidates', parmData.get('CANDIDATES', 'No'), ['Yes', 'No'])
+        if not parmData['CANDIDATES']:
+            colorize_msg(message, 'error')
             return
 
-        fclassRecord = self.getRecord('CFG_FCLASS', 'FCLASS_CODE', parmData['CLASS'].upper())
+        parmData['ANONYMIZE'], message = self.validateDomain('Anonymize', parmData.get('ANONYMIZE', 'No'), ['Yes', 'No'])
+        if not parmData['ANONYMIZE']:
+            colorize_msg(message, 'error')
+            return
+
+        parmData['DERIVED'], message = self.validateDomain('Derived', parmData.get('DERIVED', 'No'), ['Yes', 'No'])
+        if not parmData['DERIVED']:
+            colorize_msg(message, 'error')
+            return
+
+        parmData['HISTORY'], message = self.validateDomain('History', parmData.get('HISTORY', 'Yes'), ['Yes', 'No'])
+        if not parmData['HISTORY']:
+            colorize_msg(message, 'error')
+            return
+
+        matchKeyDefault = 'Yes' if parmData.get('COMPARISON') else 'No'
+        parmData['MATCHKEY'], message = self.validateDomain('MatchKey', parmData.get('MATCHKEY', matchKeyDefault), ['Yes', 'No', 'Confirm', 'Denial'])
+        if not parmData['MATCHKEY']:
+            colorize_msg(message, 'error')
+            return
+
+        behaviorData, message = self.lookupBehaviorCode(parmData['BEHAVIOR'])
+        if not behaviorData:
+            colorize_msg(message, 'error')
+            return
+
+        fclassRecord, message = self.lookupFeatureClass(parmData['CLASS'])
         if not fclassRecord:
-            colorize_msg(f"{parmData['CLASS']} is not a valid feature class", 'error')
+            colorize_msg(message, 'error')
             return
-        else:
-            fclassID = fclassRecord['FCLASS_ID']
+        fclassID = fclassRecord['FCLASS_ID']
 
-        sfuncID = 0  # standardization function
-        if 'STANDARDIZE' in parmData and len(parmData['STANDARDIZE']) != 0:
-            parmData['STANDARDIZE'] = parmData['STANDARDIZE'].upper()
-            sfuncRecord = self.getRecord('CFG_SFUNC', 'SFUNC_CODE', parmData['STANDARDIZE'])
-            if sfuncRecord:
-                sfuncID = sfuncRecord['SFUNC_ID']
-            else:
-                colorize_msg(f"{parmData['STANDARDIZE']} is not a valid standardization function", 'error')
+        sfuncID = 0
+        if parmData.get('STANDARDIZE'):
+            sfuncRecord, message = self.lookupStandardizeFunction(parmData['STANDARDIZE'])
+            if not sfuncRecord:
+                colorize_msg(message, 'error')
                 return
+        sfuncID = sfuncRecord['SFUNC_ID']
 
-        efuncID = 0  # expression function
-        if 'EXPRESSION' in parmData and len(parmData['EXPRESSION']) != 0:
-            parmData['EXPRESSION'] = parmData['EXPRESSION'].upper()
-            efuncRecord = self.getRecord('CFG_EFUNC', 'EFUNC_CODE', parmData['EXPRESSION'])
-            if efuncRecord:
-                efuncID = efuncRecord['EFUNC_ID']
-            else:
-                colorize_msg(f"{parmData['EXPRESSION']} is not a valid expression function", 'error')
+        efuncID = 0
+        if parmData.get('EXPRESSION'):
+            efuncRecord, message = self.lookupExpressionFunction(parmData['EXPRESSION'])
+            if not efuncRecord:
+                colorize_msg(message, 'error')
                 return
+        efuncID = efuncRecord['EFUNC_ID']
 
-        cfuncID = 0  # comparison function
-        if 'COMPARISON' in parmData and len(parmData['COMPARISON']) != 0:
-            parmData['COMPARISON'] = parmData['COMPARISON'].upper()
-            cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_CODE', parmData['COMPARISON'])
-            if cfuncRecord:
-                cfuncID = cfuncRecord['CFUNC_ID']
-            else:
-                colorize_msg(f"{parmData['COMPARISON']} is not a valid comparison function", 'error')
+        cfuncID = 0
+        if parmData.get('COMPARISON'):
+            cfuncRecord, message = self.lookupComparisonFunction(parmData['COMPARISON'])
+            if not cfuncRecord:
+                colorize_msg(message, 'error')
                 return
+        cfuncID = cfuncRecord['CFUNC_ID']
 
         # ensure elements going to express or compare routines
         if efuncID > 0 or cfuncID > 0:
@@ -1488,17 +1417,19 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['FTYPE_CODE'] = parmData['FEATURE']
         newRecord['FTYPE_DESC'] = parmData['FEATURE']
         newRecord['FCLASS_ID'] = fclassID
-        newRecord['FTYPE_FREQ'] = featureBehaviorDict['FREQUENCY']
-        newRecord['FTYPE_EXCL'] = featureBehaviorDict['EXCLUSIVITY']
-        newRecord['FTYPE_STAB'] = featureBehaviorDict['STABILITY']
-        newRecord['ANONYMIZE'] = 'No' if parmData['ANONYMIZE'].upper() == 'NO' else 'Yes'
-        newRecord['DERIVED'] = 'No' if parmData['DERIVED'].upper() == 'NO' else 'Yes'
-        newRecord['DERIVATION'] = parmData['DERIVATION']
-        newRecord['USED_FOR_CAND'] = 'No' if parmData['CANDIDATES'].upper() == 'NO' else 'Yes'
-        newRecord['PERSIST_HISTORY'] = 'No' if 'HISTORY' in parmData and parmData['HISTORY'].upper() == 'NO' else 'Yes'
-        newRecord['SHOW_IN_MATCH_KEY'] = parmData['MATCHKEY'] if 'MATCHKEY' in parmData else 'Yes'
-        newRecord['VERSION'] = 1
-        newRecord['RTYPE_ID'] = int(parmData['RTYPE_ID']) if 'RTYPE_ID' in parmData else 0
+        newRecord['FTYPE_FREQ'] = behaviorData['FREQUENCY']
+        newRecord['FTYPE_EXCL'] = behaviorData['EXCLUSIVITY']
+        newRecord['FTYPE_STAB'] = behaviorData['STABILITY']
+        newRecord['ANONYMIZE'] = parmData['ANONYMIZE']
+        newRecord['DERIVED'] = parmData['DERIVED']
+        newRecord['USED_FOR_CAND'] = parmData['CANDIDATES']
+        newRecord['SHOW_IN_MATCH_KEY'] = parmData.get('MATCHKEY', 'Yes')
+        # somewhat hidden fields in case an engineer wants to specify them
+        newRecord['PERSIST_HISTORY'] = parmData.get('HISTORY', 'Yes')
+        newRecord['DERIVATION'] = parmData.get('DERIVATION')
+        newRecord['VERSION'] = parmData.get('VERSION', 1)
+        newRecord['RTYPE_ID'] = parmData.get('RTYPE_ID', 0)
+
         self.cfgData['G2_CONFIG']['CFG_FTYPE'].append(newRecord)
         if self.doDebug:
             debug(newRecord, 'Feature build')
@@ -1506,10 +1437,7 @@ class G2CmdShell(cmd.Cmd, object):
         # add the standardization call
         sfcallID = 0
         if sfuncID > 0:
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_SFCALL'])):
-                if self.cfgData['G2_CONFIG']['CFG_SFCALL'][i]['SFCALL_ID'] > sfcallID:
-                    sfcallID = self.cfgData['G2_CONFIG']['CFG_SFCALL'][i]['SFCALL_ID']
-            sfcallID = sfcallID + 1 if sfcallID >= 1000 else 1000
+            sfcallID = self.getNextRecordId('CFG_SFCALL', 'SFCALL_ID', 0)
             newRecord = {}
             newRecord['SFCALL_ID'] = sfcallID
             newRecord['SFUNC_ID'] = sfuncID
@@ -1522,12 +1450,9 @@ class G2CmdShell(cmd.Cmd, object):
 
         # add the distinct value call (not supported through here yet)
         dfcallID = 0
-        dfuncID = 0  # more efficient to leave it null
+        dfuncID = 0
         if dfuncID > 0:
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_DFCALL'])):
-                if self.cfgData['G2_CONFIG']['CFG_DFCALL'][i]['DFCALL_ID'] > dfcallID:
-                    dfcallID = self.cfgData['G2_CONFIG']['CFG_DFCALL'][i]['DFCALL_ID']
-            dfcallID = dfcallID + 1 if dfcallID >= 1000 else 1000
+            dfcallID = self.getNextRecordId('CFG_DFCALL', 'DFCALL_ID', 0)
             newRecord = {}
             newRecord['DFCALL_ID'] = dfcallID
             newRecord['DFUNC_ID'] = dfuncID
@@ -1540,10 +1465,7 @@ class G2CmdShell(cmd.Cmd, object):
         # add the expression call
         efcallID = 0
         if efuncID > 0:
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_EFCALL'])):
-                if self.cfgData['G2_CONFIG']['CFG_EFCALL'][i]['EFCALL_ID'] > efcallID:
-                    efcallID = self.cfgData['G2_CONFIG']['CFG_EFCALL'][i]['EFCALL_ID']
-            efcallID = efcallID + 1 if efcallID >= 1000 else 1000
+            efcallID = self.getNextRecordId('CFG_EFCALL', 'EFCALL_ID', 0)
             newRecord = {}
             newRecord['EFCALL_ID'] = efcallID
             newRecord['EFUNC_ID'] = efuncID
@@ -1559,10 +1481,7 @@ class G2CmdShell(cmd.Cmd, object):
         # add the comparison call
         cfcallID = 0
         if cfuncID > 0:
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFCALL'])):
-                if self.cfgData['G2_CONFIG']['CFG_CFCALL'][i]['CFCALL_ID'] > cfcallID:
-                    cfcallID = self.cfgData['G2_CONFIG']['CFG_CFCALL'][i]['CFCALL_ID']
-            cfcallID = cfcallID + 1 if cfcallID >= 1000 else 1000
+            cfcallID = self.getNextRecordId('CFG_CFCALL', 'CFCALL_ID', 0)
             newRecord = {}
             newRecord['CFCALL_ID'] = cfcallID
             newRecord['CFUNC_ID'] = cfuncID
@@ -1579,28 +1498,20 @@ class G2CmdShell(cmd.Cmd, object):
 
             if type(element) == dict:
                 elementRecord = dictKeysUpper(element)
+                elementRecord['ELEMENT'] = elementRecord['ELEMENT'].upper()
             else:
                 elementRecord = {}
-                elementRecord['ELEMENT'] = element
+                elementRecord['ELEMENT'] = element.upper()
             if 'EXPRESSED' not in elementRecord:
                 elementRecord['EXPRESSED'] = 'No'
             if 'COMPARED' not in elementRecord:
                 elementRecord['COMPARED'] = 'No'
 
-            # lookup
-            elementRecord['ELEMENT'] = elementRecord['ELEMENT'].upper()
-            felemID = 0
-            maxID = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_FELEM'])):
-                if self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_CODE'] == elementRecord['ELEMENT']:
-                    felemID = self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID']
-                    break
-                if self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID'] > maxID:
-                    maxID = self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID']
-
-            # add if not found
-            if felemID == 0:
-                felemID = maxID + 1 if maxID >= 1000 else 1000
+            felemRecord, message = self.lookupElement(elementRecord['ELEMENT'])
+            if felemRecord:
+                felemID = felemRecord['FELEM_ID']
+            else:
+                felemID = self.getNextRecordId('CFG_FELEM', 'FELEM_ID', 0)
                 newRecord = {}
                 newRecord['FELEM_ID'] = felemID
                 newRecord['FELEM_CODE'] = elementRecord['ELEMENT']
@@ -1611,7 +1522,7 @@ class G2CmdShell(cmd.Cmd, object):
                 if self.doDebug:
                     debug(newRecord, 'FELEM build')
 
-            # add to distinct value  bom if any
+            # add all elements to distinct bom if specified
             if dfcallID > 0:
                 newRecord = {}
                 newRecord['DFCALL_ID'] = dfcallID
@@ -1622,7 +1533,7 @@ class G2CmdShell(cmd.Cmd, object):
                 if self.doDebug:
                     debug(newRecord, 'DFBOM build')
 
-            # add to expression bom if any
+            # add to expression bom if directed to
             if efcallID > 0 and elementRecord['EXPRESSED'].upper() == 'YES':
                 newRecord = {}
                 newRecord['EFCALL_ID'] = efcallID
@@ -1634,7 +1545,7 @@ class G2CmdShell(cmd.Cmd, object):
                 if self.doDebug:
                     debug(newRecord, 'EFBOM build')
 
-            # add to comparison bom if any
+            # add to comparison bom if directed to
             if cfcallID > 0 and elementRecord['COMPARED'].upper() == 'YES':
                 newRecord = {}
                 newRecord['CFCALL_ID'] = cfcallID
@@ -1646,7 +1557,6 @@ class G2CmdShell(cmd.Cmd, object):
                     debug(newRecord, 'CFBOM build')
 
             # standardize display_level to just display while maintaining backwards compatibility
-            #  also note that display_delem has been deprecated and does nothing
             if 'DISPLAY' in elementRecord:
                 elementRecord['DISPLAY_LEVEL'] = 1 if elementRecord['DISPLAY'].upper() == 'YES' else 0
 
@@ -1693,85 +1603,39 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f"{parmData['FEATURE']} is a locked feature", 'error')
             return
 
-        deleteCnt = 0
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_FTYPE']) - 1, -1, -1):
-            if self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_CODE'] == parmData['FEATURE']:
+        ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
+        if not ftypeRecord:
+            colorize_msg(message, 'warning')
+            return
 
-                # delete any standardization calls (must loop through backwards when deleting)
-                for i1 in range(len(self.cfgData['G2_CONFIG']['CFG_SFCALL']) - 1, -1, -1):
-                    if self.cfgData['G2_CONFIG']['CFG_SFCALL'][i1]['FTYPE_ID'] == \
-                            self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']:
-                        del self.cfgData['G2_CONFIG']['CFG_SFCALL'][i1]
+        # also delete all supporting tables
+        for fbomRecord in self.getRecordList('CFG_FBOM', 'FTYPE_ID', ftypeRecord['FTYPE_ID']):
+            self.cfgData['G2_CONFIG']['CFG_FBOM'].remove(fbomRecord)
 
-                # delete any distinct value calls and boms (must loop through backwards when deleting)
-                for i1 in range(len(self.cfgData['G2_CONFIG']['CFG_DFCALL']) - 1, -1, -1):
-                    if self.cfgData['G2_CONFIG']['CFG_DFCALL'][i1]['FTYPE_ID'] == \
-                            self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']:
-                        for i2 in range(len(self.cfgData['G2_CONFIG']['CFG_DFBOM']) - 1, -1, -1):
-                            if self.cfgData['G2_CONFIG']['CFG_DFBOM'][i2]['DFCALL_ID'] == \
-                                    self.cfgData['G2_CONFIG']['CFG_DFCALL'][i1]['DFCALL_ID']:
-                                del self.cfgData['G2_CONFIG']['CFG_DFBOM'][i2]
+        for attrRecord in self.getRecordList('CFG_ATTR', 'FTYPE_CODE', ftypeRecord['FTYPE_CODE']):
+            self.cfgData['G2_CONFIG']['CFG_ATTR'].remove(attrRecord)
 
-                        del self.cfgData['G2_CONFIG']['CFG_DFCALL'][i1]
+        for sfcallRecord in self.getRecordList('CFG_SFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID']):
+            self.cfgData['G2_CONFIG']['CFG_SFCALL'].remove(sfcallRecord)
 
-                # delete any expression calls and boms (must loop through backwards when deleting)
-                for i1 in range(len(self.cfgData['G2_CONFIG']['CFG_EFCALL']) - 1, -1, -1):
-                    if self.cfgData['G2_CONFIG']['CFG_EFCALL'][i1]['FTYPE_ID'] == \
-                            self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']:
-                        for i2 in range(len(self.cfgData['G2_CONFIG']['CFG_EFBOM']) - 1, -1, -1):
-                            if self.cfgData['G2_CONFIG']['CFG_EFBOM'][i2]['EFCALL_ID'] == \
-                                    self.cfgData['G2_CONFIG']['CFG_EFCALL'][i1]['EFCALL_ID']:
-                                del self.cfgData['G2_CONFIG']['CFG_EFBOM'][i2]
+        for efcallRecord in self.getRecordList('CFG_EFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID']):
+            for efbomRecord in self.getRecordList('CFG_EFBOM', 'EFCALL_ID', efcallRecord['EFCALL_ID']):
+                self.cfgData['G2_CONFIG']['CFG_EFBOM'].remove(efbomRecord)
 
-                        del self.cfgData['G2_CONFIG']['CFG_EFCALL'][i1]
+        for cfcallRecord in self.getRecordList('CFG_CFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID']):
+            for cfbomRecord in self.getRecordList('CFG_CFBOM', 'CFCALL_ID', cfcallRecord['CFCALL_ID']):
+                self.cfgData['G2_CONFIG']['CFG_CFBOM'].remove(cfbomRecord)
 
-                # delete the expression calls builder felems (must loop through backwards when deleting)
-                for i2 in range(len(self.cfgData['G2_CONFIG']['CFG_EFBOM']) - 1, -1, -1):
-                    if self.cfgData['G2_CONFIG']['CFG_EFBOM'][i2]['FTYPE_ID'] == \
-                            self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']:
-                        del self.cfgData['G2_CONFIG']['CFG_EFBOM'][i2]
-
-                # delete any comparison calls and boms  (must loop through backwards when deleting)
-                for i1 in range(len(self.cfgData['G2_CONFIG']['CFG_CFCALL']) - 1, -1, -1):
-                    if self.cfgData['G2_CONFIG']['CFG_CFCALL'][i1]['FTYPE_ID'] == \
-                            self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']:
-                        for i2 in range(len(self.cfgData['G2_CONFIG']['CFG_CFBOM']) - 1, -1, -1):
-                            if self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]['CFCALL_ID'] == \
-                                    self.cfgData['G2_CONFIG']['CFG_CFCALL'][i1]['CFCALL_ID']:
-                                del self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]
-                        del self.cfgData['G2_CONFIG']['CFG_CFCALL'][i1]
-
-                # delete any feature boms (must loop through backwards when deleting)
-                for i2 in range(len(self.cfgData['G2_CONFIG']['CFG_FBOM']) - 1, -1, -1):
-                    if self.cfgData['G2_CONFIG']['CFG_FBOM'][i2]['FTYPE_ID'] == \
-                            self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']:
-                        del self.cfgData['G2_CONFIG']['CFG_FBOM'][i2]
-
-                # delete the feature elements (must loop through backwards when deleting)
-                for i2 in range(len(self.cfgData['G2_CONFIG']['CFG_EBOM']) - 1, -1, -1):
-                    if self.cfgData['G2_CONFIG']['CFG_EBOM'][i2]['FTYPE_ID'] == \
-                            self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']:
-                        del self.cfgData['G2_CONFIG']['CFG_EBOM'][i2]
-
-                # delete any attributes assigned to this feature (this one is by code, not ID!)
-                for i2 in range(len(self.cfgData['G2_CONFIG']['CFG_ATTR']) - 1, -1, -1):
-                    if self.cfgData['G2_CONFIG']['CFG_ATTR'][i2]['FTYPE_CODE'] == \
-                            self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_CODE']:
-                        del self.cfgData['G2_CONFIG']['CFG_ATTR'][i2]
-
-                # delete the feature itself
-                del self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]
-                deleteCnt += 1
-                self.configUpdated = True
-
-        if deleteCnt == 0:
-            colorize_msg('Feature not found', 'caution')
-        else:
-            colorize_msg('Successfully deleted!', 'success')
+        for dfcallRecord in self.getRecordList('CFG_DFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID']):
+            for dfbomRecord in self.getRecordList('CFG_DFBOM', 'DFCALL_ID', cfcallRecord['DFCALL_ID']):
+                self.cfgData['G2_CONFIG']['CFG_DFBOM'].remove(dfbomRecord)
+        self.cfgData['G2_CONFIG']['CFG_FTYPE'].remove(ftypeRecord)
+        colorize_msg(f'Successfully deleted!', 'success')
+        self.configUpdated = True
 
     def do_setFeature(self, arg):
         """
-        Sets certain configuration parameters for an exiting feature
+        Sets configuration parameters for an exiting feature
 
         Syntax:
             setFeature [partial_json_configuration]
@@ -1800,69 +1664,119 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         # lookup feature and error if doesn't exist
-        listID = -1
-        ftypeID = 0
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_FTYPE'])):
-            if self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_CODE'] == parmData['FEATURE']:
-                listID = i
-                ftypeID = self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']
-        if listID == -1:
-            colorize_msg('Feature does not exist!', 'caution')
+        old_ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
+        if not old_ftypeRecord:
+            colorize_msg(message, 'warning')
             return
 
+        ftypeRecord = old_ftypeRecord
+
         # make the updates
+        error_cnt = 0
         for parmCode in parmData:
             if parmCode == 'FEATURE':
-                pass
-
-            elif parmCode == 'BEHAVIOR':
-                featureBehaviorDict = parseFeatureBehavior(parmData['BEHAVIOR'])
-                if featureBehaviorDict:
-                    self.cfgData['G2_CONFIG']['CFG_FTYPE'][listID]['FTYPE_FREQ'] = featureBehaviorDict['FREQUENCY']
-                    self.cfgData['G2_CONFIG']['CFG_FTYPE'][listID]['FTYPE_EXCL'] = featureBehaviorDict['EXCLUSIVITY']
-                    self.cfgData['G2_CONFIG']['CFG_FTYPE'][listID]['FTYPE_STAB'] = featureBehaviorDict['STABILITY']
-                    colorize_msg('Behavior successfully updated!', 'success')
-                    self.configUpdated = True
-                else:
-                    colorize_msg('Invalid behavior code', 'error')
-
-            elif parmCode == 'ANONYMIZE':
-                if parmData['ANONYMIZE'].upper() in ('YES', 'Y', 'NO', 'N'):
-                    self.cfgData['G2_CONFIG']['CFG_FTYPE'][listID]['ANONYMIZE'] = 'Yes' \
-                        if parmData['ANONYMIZE'].upper().startswith('Y') else 'No'
-                    colorize_msg('Anonymize setting successfully updated!', 'success')
-                    self.configUpdated = True
-                else:
-                    colorize_msg('Invalid anonymize setting', 'error')
+                continue
 
             elif parmCode == 'CANDIDATES':
-                if parmData['CANDIDATES'].upper() in ('YES', 'Y', 'NO', 'N'):
-                    self.cfgData['G2_CONFIG']['CFG_FTYPE'][listID]['USED_FOR_CAND'] = 'Yes' \
-                        if parmData['CANDIDATES'].upper().startswith('Y') else 'No'
-                    colorize_msg('Candidates setting successfully updated!', 'success')
-                    self.configUpdated = True
+                parmData['CANDIDATES'], message = self.validateDomain('Candidates', parmData.get('CANDIDATES', 'No'), ['Yes', 'No'])
+                if not parmData['CANDIDATES']:
+                    colorize_msg(message, 'error')
+                    error_cnt += 1
                 else:
-                    colorize_msg('Invalid candidates setting', 'error')
+                    ftypeRecord['USED_FOR_CAND'] = parmData['CANDIDATES']
+
+            elif parmCode == 'ANONYMIZE':
+                parmData['ANONYMIZE'], message = self.validateDomain('Anonymize', parmData.get('ANONYMIZE', 'No'), ['Yes', 'No'])
+                if not parmData['ANONYMIZE']:
+                    colorize_msg(message, 'error')
+                    error_cnt += 1
+                else:
+                    ftypeRecord['ANONYMIZE'] = parmData['ANONYMIZE']
+
+            elif parmCode == 'DERIVED':
+                parmData['DERIVED'], message = self.validateDomain('Derived', parmData.get('DERIVED', 'No'), ['Yes', 'No'])
+                if not parmData['DERIVED']:
+                    colorize_msg(message, 'error')
+                    error_cnt += 1
+                else:
+                    ftypeRecord['DERIVED'] = parmData['DERIVED']
+
+            elif parmCode == 'HISTORY':
+                parmData['HISTORY'], message = self.validateDomain('History', parmData.get('HISTORY', 'Yes'), ['Yes', 'No'])
+                if not parmData['HISTORY']:
+                    colorize_msg(message, 'error')
+                    error_cnt += 1
+                else:
+                    ftypeRecord['HISTORY'] = parmData['HISTORY']
+
+            elif parmCode == 'MATCHKEY':
+                matchKeyDefault = 'Yes' if parmData.get('COMPARISON') else 'No'
+                parmData['MATCHKEY'], message = self.validateDomain('MatchKey', parmData.get('MATCHKEY', matchKeyDefault), ['Yes', 'No', 'Confirm', 'Denial'])
+                if not parmData['MATCHKEY']:
+                    colorize_msg(message, 'error')
+                    error_cnt += 1
+                else:
+                    ftypeRecord['MATCHKEY'] = parmData['MATCHKEY']
+
+            elif parmCode == 'BEHAVIOR':
+                behaviorData, message = self.lookupBehaviorCode(parmData['BEHAVIOR'])
+                if not behaviorData:
+                    colorize_msg(message, 'error')
+                    error_cnt += 1
+                else:
+                    ftypeRecord['BEHAVIOR'] = parmData['BEHAVIOR']
+
+            elif parmCode == 'CLASS':
+                fclassRecord, message = self.lookupFeatureClass(parmData['CLASS'])
+                if not fclassRecord:
+                    colorize_msg(message, 'error')
+                    error_cnt += 1
+                else:
+                    ftypeRecord['FCLASS_ID'] = fclassRecord['FCLASS_ID']
 
             elif parmCode == 'STANDARDIZE':
-                sfuncRecord = self.getRecord('CFG_SFUNC', 'SFUNC_CODE', parmData['STANDARDIZE'].upper())
-                if sfuncRecord:
-                    sfuncID = sfuncRecord['SFUNC_ID']
-                    subListID = 0
-                    for i in range(len(self.cfgData['G2_CONFIG']['CFG_SFCALL'])):
-                        if self.cfgData['G2_CONFIG']['CFG_SFCALL'][i]['FTYPE_ID'] == ftypeID:
-                            subListID = i
-                    if subListID != 0:
-                        self.cfgData['G2_CONFIG']['CFG_SFCALL'][subListID]['SFUNC_ID'] = sfuncID
-                        colorize_msg('Standardization function updated!', 'success')
-                        self.configUpdated = True
-                    else:
-                        colorize_msg('Standardization call can only be added with the feature', 'error')
+                sfuncRecord, message = self.lookupStandardizeFunction(parmData['STANDARDIZE'])
+                if not sfuncRecord:
+                    colorize_msg(message, 'error')
+                    error_cnt += 1
                 else:
-                    colorize_msg('Invalid standardization code', 'error')
+                    ftypeRecord['SFUNC_ID'] = funcRecord['SFUNC_ID']
+
+            elif parmCode == 'EXPRESSION':
+                efuncRecord, message = self.lookupExpressionFunction(parmData['EXPRESSION'])
+                if not efuncRecord:
+                    colorize_msg(message, 'error')
+                    error_cnt += 1
+                elif not old_ftypeRecord['EFUNC_ID']:
+                    colorize_msg('Expression function cannot be added here! use command "addExpressionCall" instead', 'error')
+                    error_cnt += 1
+                else:
+                    ftypeRecord['EFUNC_ID'] = funcRecord['EFUNC_ID']
+
+            elif parmCode == 'COMPARISON':
+                cfuncRecord, message = self.lookupComparisonFunction(parmData['COMPARISON'])
+                if not cfuncRecord:
+                    colorize_msg(message, 'error')
+                    error_cnt += 1
+                elif not old_ftypeRecord['CFUNC_ID']:
+                    colorize_msg('Comparison function cannot be added here! use command "addComparisonCall" instead', 'error')
+                    error_cnt += 1
+                else:
+                    ftypeRecord['CFUNC_ID'] = funcRecord['CFUNC_ID']
 
             else:
-                colorize_msg(f'Cannot set {parmCode}', 'error')
+                colorize_msg(f'Cannot set {parmCode} on features!', 'error')
+
+        if error_cnt > 0:
+            colorize_msg(f'Errors encountered, feature not updated!', 'warning')
+        else:
+            self.cfgData['G2_CONFIG']['CFG_FTYPE'].remove(old_ftypeRecord)
+            self.cfgData['G2_CONFIG']['CFG_FTYPE'].append(ftypeRecord)
+            colorize_msg(f'Successfully updated!', 'success')
+            self.configUpdated = True
+
+
+
 
     def do_addToNamehash(self, arg):
         """
@@ -1930,7 +1844,7 @@ class G2CmdShell(cmd.Cmd, object):
             if self.cfgData['G2_CONFIG']['CFG_EFBOM'][i]['EFCALL_ID'] == nameHasher_efcallID and \
                     self.cfgData['G2_CONFIG']['CFG_EFBOM'][i]['FTYPE_ID'] == ftypeID and \
                     self.cfgData['G2_CONFIG']['CFG_EFBOM'][i]['FELEM_ID'] == felemID:
-                colorize_msg('Already added to name hash!', 'caution')
+                colorize_msg('Already added to name hash!', 'warning')
                 return
 
         # add record
@@ -1964,7 +1878,7 @@ class G2CmdShell(cmd.Cmd, object):
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"FEATURE": arg}
             parmData['FEATURE'] = parmData['FEATURE'].upper()
         except (ValueError, KeyError) as err:
-            colorize_msg(err, 'error')
+            colorize_msg(f'Invalid parameter: {err}', 'error')
             return
 
         try:
@@ -2029,40 +1943,21 @@ class G2CmdShell(cmd.Cmd, object):
         jsonString += ', "internal": "%s"' % attributeRecord['INTERNAL']
         jsonString += '}'
 
-        return jsonString
-
-    def do_listAttributeClasses(self, arg):
-        """
-        Returns the list of attribute classes
-
-        Syntax:
-            nlistAttributeClasses [optional_search_filter]
-
-        Notes:
-            Attribute classes just provide a grouping that can be used for organizing data
-            and has no impact on resolution.
-        """
-        arg = self.check_arg_for_list_format(arg)
-        json_lines = []
-        for attrClass in self.attributeClassList:
-            if arg and arg.lower() not in str(attrClass).lower():
-                continue
-            json_lines.append({"attributeClass": attrClass})
-        self.print_json_lines(json_lines)
+        return json.loads(jsonString)
 
     def do_listAttributes(self, arg):
         """
         Returns the list of registered attributes
 
         Syntax:
-            listAttribute [optional_search_filter]
+            listAttributes [optional_search_filter] [optional_output_format]
         """
         arg = self.check_arg_for_list_format(arg)
         json_lines = []
         for attrRecord in sorted(self.getRecordList('CFG_ATTR'), key=lambda k: k['ATTR_ID']):
             if arg and arg.lower() not in str(attrRecord).lower():
                 continue
-            json_lines.append(json.loads(self.getAttributeJson(attrRecord)))
+            json_lines.append(self.getAttributeJson(attrRecord))
         self.print_json_lines(json_lines)
 
     def do_getAttribute(self, arg):
@@ -2070,14 +1965,27 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a specific attribute's json configuration
 
         Syntax:
-            getAttribute [attribute]  <--will display the selected attribute only
-            getAttribute [feature]    <--will display all the attributes for a feature
+            getAttribute [attribute] [optional_output_format]
 
         Example:
-            getAttribute NAME_FULL
-            getAttribute NAME
+            getAttribute NAME_FULL json
+
+        Notes:
+            If you specify a valid feature, all of its attributes will be displayed
+                try: getAttribute PASSPORT jsonl
         """
-        arg = self.check_arg_for_get_format(arg)
+
+        # hack to determine if they specified an attribute or a feature so we can potentially set the correct output format
+        if arg and len(arg.split()) > 1:
+            attrRecords = self.getRecordList('CFG_ATTR', 'ATTR_CODE', arg.split()[0])
+            if attrRecords:
+                arg = self.check_arg_for_get_format(arg)
+            else:
+                attrRecords = self.getRecordList('CFG_ATTR', 'FTYPE_CODE', arg.split()[0])
+                if attr_records:
+                    arg = self.check_arg_for_list_format(arg)
+        # end of hack
+
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -2098,462 +2006,24 @@ class G2CmdShell(cmd.Cmd, object):
         else:
             json_lines = []
             for attrRecord in sorted(attrRecords, key=lambda k: k['ATTR_ID']):
-                json_lines.append(json.loads(self.getAttributeJson(attrRecord)))
+                json_lines.append(self.getAttributeJson(attrRecord))
             self.print_json_lines(json_lines)
-
-
-
-
-# ===== atomic functions section =====
-
-    def do_addFeatureComparisonElement(self, arg):
-        """\naddFeatureComparisonElement {"feature": "<feature_name>", "element": "<element_name>"}\n"""
-
-        if not argCheck('addFeatureComparisonElement', arg, self.do_addFeatureComparisonElement.__doc__):
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['FEATURE'] = parmData['FEATURE'].upper()
-            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            # lookup feature and error if it doesn't exist
-            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-            if not ftypeRecord:
-                colorize_msg('Feature %s not found!' % parmData['FEATURE'], 'B')
-                return
-            ftypeID = ftypeRecord['FTYPE_ID']
-
-            # lookup element and error if it doesn't exist
-            felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
-            if not felemRecord:
-                colorize_msg('Element %s not found!' % parmData['ELEMENT'], 'B')
-                return
-            felemID = felemRecord['FELEM_ID']
-
-            # find the comparison function call
-            cfcallRecord = self.getRecord('CFG_CFCALL', 'FTYPE_ID', ftypeID)
-            if not cfcallRecord:
-                colorize_msg('Comparison function for feature %s not found!' % parmData['FEATURE'], 'B')
-                return
-            cfcallID = cfcallRecord['CFCALL_ID']
-
-            # check to see if the element is already in the feature
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFBOM']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_CFBOM'][i]['CFCALL_ID'] == cfcallID and \
-                        self.cfgData['G2_CONFIG']['CFG_CFBOM'][i]['FELEM_ID'] == felemID:
-                    colorize_msg('Comparison function for feature %s already contains element %s!' % (
-                        parmData['FEATURE'], parmData['ELEMENT']), 'B')
-                    return
-
-            # add the feature element
-            cfbomExecOrder = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFBOM'])):
-                if self.cfgData['G2_CONFIG']['CFG_CFBOM'][i]['CFCALL_ID'] == cfcallID:
-                    if self.cfgData['G2_CONFIG']['CFG_CFBOM'][i]['EXEC_ORDER'] > cfbomExecOrder:
-                        cfbomExecOrder = self.cfgData['G2_CONFIG']['CFG_CFBOM'][i]['EXEC_ORDER']
-            cfbomExecOrder = cfbomExecOrder + 1
-            newRecord = {}
-            newRecord['CFCALL_ID'] = cfcallID
-            newRecord['EXEC_ORDER'] = cfbomExecOrder
-            newRecord['FTYPE_ID'] = ftypeID
-            newRecord['FELEM_ID'] = felemID
-            self.cfgData['G2_CONFIG']['CFG_CFBOM'].append(newRecord)
-            if self.doDebug:
-                debug(newRecord, 'CFBOM build')
-
-            # we made it!
-            self.configUpdated = True
-            colorize_msg('Successfully added!', 'B')
-
-    def do_addFeatureDistinctCallElement(self, arg):
-        """\naddFeatureDistinctCallElement {"feature": "<feature_name>", "element": "<element_name>"}\n"""
-
-        if not argCheck('addFeatureDistinctCallElement', arg, self.do_addFeatureDistinctCallElement.__doc__):
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['FEATURE'] = parmData['FEATURE'].upper()
-            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            # lookup feature and error if it doesn't exist
-            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-            if not ftypeRecord:
-                colorize_msg('Feature %s not found!' % parmData['FEATURE'], 'B')
-                return
-            ftypeID = ftypeRecord['FTYPE_ID']
-
-            # lookup element and error if it doesn't exist
-            felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
-            if not felemRecord:
-                colorize_msg('Element %s not found!' % parmData['ELEMENT'], 'B')
-                return
-            felemID = felemRecord['FELEM_ID']
-
-            # find the distinct function call
-            dfcallRecord = self.getRecord('CFG_DFCALL', 'FTYPE_ID', ftypeID)
-            if not dfcallRecord:
-                colorize_msg('Distinct function for feature %s not found!' % parmData['FEATURE'], 'B')
-                return
-            dfcallID = dfcallRecord['DFCALL_ID']
-
-            # check to see if the element is already in the feature
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_DFBOM']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_DFBOM'][i]['DFCALL_ID'] == dfcallID and \
-                        self.cfgData['G2_CONFIG']['CFG_DFBOM'][i]['FELEM_ID'] == felemID:
-                    colorize_msg('Distinct function for feature %s already contains element %s!' % (
-                        parmData['FEATURE'], parmData['ELEMENT']), 'B')
-                    return
-
-            # add the feature element
-            dfbomExecOrder = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_DFBOM'])):
-                if self.cfgData['G2_CONFIG']['CFG_DFBOM'][i]['DFCALL_ID'] == dfcallID:
-                    if self.cfgData['G2_CONFIG']['CFG_DFBOM'][i]['EXEC_ORDER'] > dfbomExecOrder:
-                        dfbomExecOrder = self.cfgData['G2_CONFIG']['CFG_DFBOM'][i]['EXEC_ORDER']
-            dfbomExecOrder = dfbomExecOrder + 1
-            newRecord = {}
-            newRecord['DFCALL_ID'] = dfcallID
-            newRecord['EXEC_ORDER'] = dfbomExecOrder
-            newRecord['FTYPE_ID'] = ftypeID
-            newRecord['FELEM_ID'] = felemID
-            self.cfgData['G2_CONFIG']['CFG_DFBOM'].append(newRecord)
-            if self.doDebug:
-                debug(newRecord, 'DFBOM build')
-
-            # we made it!
-            self.configUpdated = True
-            colorize_msg('Successfully added!', 'B')
-
-    def do_addFeatureComparison(self, arg):
-        """
-        \n\taddFeatureComparison {"feature": "<feature_name>", "comparison": "<comparison_function>", "elementList": ["<element_detail(s)"]}
-        '\n\n\taddFeatureComparison {"feature":"testFeat", "comparison":"exact_comp", "elementlist": [{"element": "test"}]}\n
-        """
-
-        if not argCheck('addFeatureComparison', arg, self.do_addFeatureComparison.__doc__):
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['FEATURE'] = parmData['FEATURE'].upper()
-            if 'ELEMENTLIST' not in parmData or len(parmData['ELEMENTLIST']) == 0:
-                raise ValueError('Element list is required!')
-            if type(parmData['ELEMENTLIST']) is not list:
-                raise ValueError(
-                    'Element list should be specified as: "elementlist": ["<values>"]\n\n\tNote the [ and ]')
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            # lookup feature and error if it doesn't exist
-            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-            if not ftypeRecord:
-                colorize_msg('Feature %s not found!' % parmData['FEATURE'], 'B')
-                return
-            ftypeID = ftypeRecord['FTYPE_ID']
-
-            cfuncID = 0  # comparison function
-            if 'COMPARISON' not in parmData or len(parmData['COMPARISON']) == 0:
-                colorize_msg('Comparison function not specified!', 'B')
-                return
-            parmData['COMPARISON'] = parmData['COMPARISON'].upper()
-            cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_CODE', parmData['COMPARISON'])
-            if cfuncRecord:
-                cfuncID = cfuncRecord['CFUNC_ID']
-            else:
-                colorize_msg('Invalid comparison function code: %s' % parmData['COMPARISON'], 'B')
-                return
-
-            # ensure we have elements
-            elementCount = 0
-            for element in parmData['ELEMENTLIST']:
-                elementCount += 1
-                elementRecord = dictKeysUpper(element)
-                elementRecord['ELEMENT'] = elementRecord['ELEMENT'].upper()
-                felemID = 0
-                for i in range(len(self.cfgData['G2_CONFIG']['CFG_FELEM'])):
-                    if self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_CODE'] == elementRecord['ELEMENT']:
-                        felemID = self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID']
-                        break
-                if felemID == 0:
-                    colorize_msg('Invalid element: %s' % elementRecord['ELEMENT'], 'B')
-                    return
-            if elementCount == 0:
-                colorize_msg('No elements specified for comparison', 'B')
-                return
-
-            # add the comparison call
-            cfcallID = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFCALL'])):
-                if self.cfgData['G2_CONFIG']['CFG_CFCALL'][i]['CFCALL_ID'] > cfcallID:
-                    cfcallID = self.cfgData['G2_CONFIG']['CFG_CFCALL'][i]['CFCALL_ID']
-            cfcallID = cfcallID + 1 if cfcallID >= 1000 else 1000
-            newRecord = {}
-            newRecord['CFCALL_ID'] = cfcallID
-            newRecord['CFUNC_ID'] = cfuncID
-            newRecord['EXEC_ORDER'] = 1
-            newRecord['FTYPE_ID'] = ftypeID
-            self.cfgData['G2_CONFIG']['CFG_CFCALL'].append(newRecord)
-            if self.doDebug:
-                debug(newRecord, 'CFCALL build')
-
-            # add elements
-            cfbomOrder = 0
-            for element in parmData['ELEMENTLIST']:
-                cfbomOrder += 1
-                elementRecord = dictKeysUpper(element)
-
-                # lookup
-                elementRecord['ELEMENT'] = elementRecord['ELEMENT'].upper()
-                felemID = 0
-                for i in range(len(self.cfgData['G2_CONFIG']['CFG_FELEM'])):
-                    if self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_CODE'] == elementRecord['ELEMENT']:
-                        felemID = self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID']
-                        break
-
-                # add to comparison bom if any
-                newRecord = {}
-                newRecord['CFCALL_ID'] = cfcallID
-                newRecord['EXEC_ORDER'] = cfbomOrder
-                newRecord['FTYPE_ID'] = ftypeID
-                newRecord['FELEM_ID'] = felemID
-                self.cfgData['G2_CONFIG']['CFG_CFBOM'].append(newRecord)
-                if self.doDebug:
-                    debug(newRecord, 'CFBOM build')
-
-            # we made it!
-            self.configUpdated = True
-            colorize_msg('Successfully added!', 'B')
-
-    def do_setFeatureComparison(self, arg):
-        """\nsetFeatureComparison {"feature": "<feature_name>", "comparison": "<comparison_function>"}\n"""
-
-        if not argCheck('setFeatureComparison', arg, self.do_setFeatureComparison.__doc__):
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['FEATURE'] = parmData['FEATURE'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            # lookup feature and error if it doesn't exist
-            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-            if not ftypeRecord:
-                colorize_msg('Feature %s not found!' % parmData['FEATURE'], 'B')
-                return
-            ftypeID = ftypeRecord['FTYPE_ID']
-
-            cfuncID = 0  # comparison function
-            if 'COMPARISON' not in parmData or len(parmData['COMPARISON']) == 0:
-                colorize_msg('Comparison function not specified!', 'B')
-                return
-            parmData['COMPARISON'] = parmData['COMPARISON'].upper()
-            cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_CODE', parmData['COMPARISON'])
-            if cfuncRecord:
-                cfuncID = cfuncRecord['CFUNC_ID']
-            else:
-                colorize_msg('Invalid comparison function code: %s' % parmData['COMPARISON'], 'B')
-                return
-
-            # set the comparison call
-            modificationMade = False
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFCALL'])):
-                if self.cfgData['G2_CONFIG']['CFG_CFCALL'][i]['FTYPE_ID'] == ftypeID:
-                    self.cfgData['G2_CONFIG']['CFG_CFCALL'][i]['CFUNC_ID'] = cfuncID
-                    modificationMade = True
-            if not modificationMade:
-                colorize_msg(
-                    'No previous comparison method for \'%s\' exists.  Use \'addFeatureComparison\' instead.' %
-                    parmData['FEATURE'], 'B')
-                return
-
-            # we made it!
-            self.configUpdated = True
-            colorize_msg('Successfully added!', 'B')
-
-    def do_deleteFeatureComparisonElement(self, arg):
-        """\ndeleteFeatureComparisonElement {"feature": "<feature_name>", "element": "<element_name>"}\n"""
-
-        if not argCheck('deleteFeatureComparisonElement', arg, self.do_deleteFeatureComparisonElement.__doc__):
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['FEATURE'] = parmData['FEATURE'].upper()
-            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            # lookup feature and error if it doesn't exist
-            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-            if not ftypeRecord:
-                colorize_msg('Feature %s not found!' % parmData['FEATURE'], 'B')
-                return
-
-            # lookup element and error if it doesn't exist
-            felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
-            if not felemRecord:
-                colorize_msg('Element %s not found!' % parmData['ELEMENT'], 'B')
-                return
-
-            deleteCnt = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_FTYPE']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_CODE'] == parmData['FEATURE']:
-                    for i1 in range(len(self.cfgData['G2_CONFIG']['CFG_CFCALL']) - 1, -1, -1):
-                        if self.cfgData['G2_CONFIG']['CFG_CFCALL'][i1]['FTYPE_ID'] == ftypeRecord['FTYPE_ID']:
-                            for i2 in range(len(self.cfgData['G2_CONFIG']['CFG_CFBOM']) - 1, -1, -1):
-                                if self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]['CFCALL_ID'] == \
-                                        self.cfgData['G2_CONFIG']['CFG_CFCALL'][i1]['CFCALL_ID'] and \
-                                        self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]['FTYPE_ID'] == ftypeRecord[
-                                    'FTYPE_ID'] and self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]['FELEM_ID'] == \
-                                        felemRecord['FELEM_ID']:
-                                    del self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]
-                                    deleteCnt += 1
-                                    self.configUpdated = True
-
-            if deleteCnt == 0:
-                colorize_msg('Feature comparator element not found!', 'B')
-            else:
-                colorize_msg('%s rows deleted!' % deleteCnt, 'B')
-
-    def do_deleteFeatureComparison(self, arg):
-        """\ndeleteFeatureComparison {"feature": "<feature_name>"}\n"""
-
-        if not argCheck('deleteFeatureComparison', arg, self.do_deleteFeatureComparison.__doc__):
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"FEATURE": arg}
-            parmData['FEATURE'] = parmData['FEATURE'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            # lookup feature and error if it doesn't exist
-            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-            if not ftypeRecord:
-                colorize_msg('Feature %s not found!' % parmData['FEATURE'], 'B')
-                return
-
-            deleteCnt = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_FTYPE']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_CODE'] == parmData['FEATURE']:
-
-                    # delete any comparison calls and boms  (must loop through backwards when deleting)
-                    for i1 in range(len(self.cfgData['G2_CONFIG']['CFG_CFCALL']) - 1, -1, -1):
-                        if self.cfgData['G2_CONFIG']['CFG_CFCALL'][i1]['FTYPE_ID'] == \
-                                self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']:
-                            for i2 in range(len(self.cfgData['G2_CONFIG']['CFG_CFBOM']) - 1, -1, -1):
-                                if self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]['CFCALL_ID'] == \
-                                        self.cfgData['G2_CONFIG']['CFG_CFCALL'][i1]['CFCALL_ID']:
-                                    del self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]
-                                    deleteCnt += 1
-                            del self.cfgData['G2_CONFIG']['CFG_CFCALL'][i1]
-                            deleteCnt += 1
-                            self.configUpdated = True
-
-            if deleteCnt == 0:
-                colorize_msg('Feature comparator not found!', 'B')
-            else:
-                colorize_msg('%s rows deleted!' % deleteCnt, 'B')
-
-    def do_deleteFeatureDistinctCall(self, arg):
-        """\ndeleteFeatureDistinctCall {"feature": "<feature_name>"}\n"""
-
-        if not argCheck('deleteFeatureDistinctCall', arg, self.do_deleteFeatureDistinctCall.__doc__):
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"FEATURE": arg}
-            parmData['FEATURE'] = parmData['FEATURE'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            # lookup feature and error if it doesn't exist
-            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-            if not ftypeRecord:
-                colorize_msg('Feature %s not found!' % parmData['FEATURE'], 'B')
-                return
-
-            deleteCnt = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_FTYPE']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_CODE'] == parmData['FEATURE']:
-
-                    # delete any distinct-func calls and boms  (must loop through backwards when deleting)
-                    for i1 in range(len(self.cfgData['G2_CONFIG']['CFG_DFCALL']) - 1, -1, -1):
-                        if self.cfgData['G2_CONFIG']['CFG_DFCALL'][i1]['FTYPE_ID'] == \
-                                self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']:
-                            for i2 in range(len(self.cfgData['G2_CONFIG']['CFG_DFBOM']) - 1, -1, -1):
-                                if self.cfgData['G2_CONFIG']['CFG_DFBOM'][i2]['DFCALL_ID'] == \
-                                        self.cfgData['G2_CONFIG']['CFG_DFCALL'][i1]['DFCALL_ID']:
-                                    del self.cfgData['G2_CONFIG']['CFG_DFBOM'][i2]
-                                    deleteCnt += 1
-                            del self.cfgData['G2_CONFIG']['CFG_DFCALL'][i1]
-                            deleteCnt += 1
-                            self.configUpdated = True
-
-            if deleteCnt == 0:
-                colorize_msg('Feature distinct call not found!', 'B')
-            else:
-                colorize_msg('%s rows deleted!' % deleteCnt, 'B')
-
-
-    def do_deleteAttribute(self, arg):
-        """
-        \n\tdeleteAttribute {"attribute": "<attribute_name>"}
-        \n\tdeleteAttribute {"feature": "<feature_name>"}\t\tDelete all the attributes for a feature\n
-        """
-
-        if not argCheck('deleteAttribute', arg, self.do_deleteAttribute.__doc__):
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ATTRIBUTE": arg}
-            if 'ATTRIBUTE' in parmData and len(parmData['ATTRIBUTE'].strip()) != 0:
-                searchField = 'ATTR_CODE'
-                searchValue = parmData['ATTRIBUTE'].upper()
-            elif 'ID' in parmData and len(parmData['ID'].strip()) != 0:
-                searchField = 'ATTR_ID'
-                searchValue = int(parmData['ID'])
-            elif 'FEATURE' in parmData and len(parmData['FEATURE'].strip()) != 0:
-                searchField = 'FTYPE_CODE'
-                searchValue = parmData['FEATURE'].upper()
-            else:
-                raise ValueError(arg)
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            deleteCnt = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_ATTR']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_ATTR'][i][searchField] == searchValue:
-                    del self.cfgData['G2_CONFIG']['CFG_ATTR'][i]
-                    deleteCnt += 1
-                    self.configUpdated = True
-            if deleteCnt == 0:
-                print('\nRecord not found!\n')
-            colorize_msg('%s rows deleted!' % deleteCnt, 'B')
 
     def do_addAttribute(self, arg):
         """
-        \n\taddAttribute {"attribute": "<attribute_name>"}
-        \n\n\taddAttribute {"attribute": "<attribute_name>", "class": "<class_type>", "feature": "<feature_name>", "element": "<element_type>"}
-        \n\n\tFor additional example structures, use getAttribute or listAttributes\n
-        """
+        Adds a new attribute and maps it to a feature element
 
-        if not argCheck('addAttribute', arg, self.do_addAttribute.__doc__):
+        Syntax:
+            addAttribute [json configuration]
+
+        Examples:
+            see listAttributes or getAttribute [attribute] for examples
+
+        Notes:
+            - The best way to add an attribute is via templateAdd as it adds both the feature and its attributes.
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -2565,7 +2035,7 @@ class G2CmdShell(cmd.Cmd, object):
             if 'CLASS' in parmData and len(parmData['CLASS']) != 0:
                 parmData['CLASS'] = parmData['CLASS'].upper()
                 if parmData['CLASS'] not in self.attributeClassList:
-                    colorize_msg('Invalid attribute class: %s' % parmData['CLASS'], 'B')
+                    colorize_msg('Invalid attribute class, type listClasses to see a list of valid attribute classes', 'error')
                     return
             else:
                 parmData['CLASS'] = 'OTHER'
@@ -2574,7 +2044,7 @@ class G2CmdShell(cmd.Cmd, object):
                 parmData['FEATURE'] = parmData['FEATURE'].upper()
                 ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
                 if not ftypeRecord:
-                    colorize_msg('Invalid feature: %s' % parmData['FEATURE'], 'B')
+                    colorize_msg('Feature does not exist', 'error')
                     return
             else:
                 parmData['FEATURE'] = None
@@ -2587,29 +2057,25 @@ class G2CmdShell(cmd.Cmd, object):
                 else:
                     felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
                     if not felemRecord:
-                        colorize_msg('Invalid element: %s' % parmData['ELEMENT'], 'B')
+                        colorize_msg('Element does not exist', 'error')
                         return
                     else:
-                        if not self.getRecord('CFG_FBOM', ['FTYPE_ID', 'FELEM_ID'],
-                                              [ftypeRecord['FTYPE_ID'], felemRecord['FELEM_ID']]):
-                            colorize_msg(
-                                '%s is not an element of feature %s' % (parmData['ELEMENT'], parmData['FEATURE']), 'B')
+                        if not self.getRecord('CFG_FBOM', ['FTYPE_ID', 'FELEM_ID'], [ftypeRecord['FTYPE_ID'], felemRecord['FELEM_ID']]):
+                            colorize_msg(f"{parmData['ELEMENT']} is not an element of feature {parmData['FEATURE']}", 'error')
                             return
             else:
                 parmData['ELEMENT'] = None
                 felemRecord = None
 
             if (ftypeRecord and not felemRecord) or (felemRecord and not ftypeRecord):
-                colorize_msg('Must have both a feature and an element if either are supplied', 'B')
+                colorize_msg('Must have both a feature and an element if either are supplied', 'error')
                 return
 
             if 'REQUIRED' not in parmData or len(parmData['REQUIRED'].strip()) == 0:
                 parmData['REQUIRED'] = 'No'
             else:
                 if parmData['REQUIRED'].upper() not in ('YES', 'NO', 'ANY', 'DESIRED'):
-                    colorize_msg(
-                        'Invalid required value: %s  (must be "Yes", "No", "Any" or "Desired")' % parmData['REQUIRED'],
-                        'B')
+                    colorize_msg('required value must be "Yes", "No", "Any" or "Desired"', 'error')
                     return
 
             if 'DEFAULT' not in parmData:
@@ -2622,10 +2088,10 @@ class G2CmdShell(cmd.Cmd, object):
             maxID = 0
             for i in range(len(self.cfgData['G2_CONFIG']['CFG_ATTR'])):
                 if self.cfgData['G2_CONFIG']['CFG_ATTR'][i]['ATTR_CODE'] == parmData['ATTRIBUTE']:
-                    colorize_msg('Attribute %s already exists!' % parmData['ATTRIBUTE'], 'B')
+                    colorize_msg('Attribute already exists!', 'warning')
                     return
                 if 'ID' in parmData and int(self.cfgData['G2_CONFIG']['CFG_ATTR'][i]['ATTR_ID']) == int(parmData['ID']):
-                    colorize_msg('Attribute ID %s already exists!' % parmData['ID'], 'B')
+                    colorize_msg('Attribute ID already exists!', 'error')
                     return
                 if self.cfgData['G2_CONFIG']['CFG_ATTR'][i]['ATTR_ID'] > maxID:
                     maxID = self.cfgData['G2_CONFIG']['CFG_ATTR'][i]['ATTR_ID']
@@ -2645,66 +2111,356 @@ class G2CmdShell(cmd.Cmd, object):
             newRecord['INTERNAL'] = 'Yes' if parmData['INTERNAL'].upper() == 'YES' else 'No'
             self.cfgData['G2_CONFIG']['CFG_ATTR'].append(newRecord)
             self.configUpdated = True
-            colorize_msg('Successfully added!', 'B')
+            colorize_msg('Successfully added!', 'success')
             if self.doDebug:
                 debug(newRecord)
 
-# ===== element commands =====
+    def do_deleteAttribute(self, arg):
+        """
+        Deletes an attribute
 
-    def do_listElements(self, arg):
-        """\nlistElements [search_filter]\n"""
+        Syntax:
+            deleteAttribute [attribute]
 
-        json_lines = []
-        for elemRecord in sorted(self.getRecordList('CFG_FELEM'), key=lambda k: k['FELEM_ID']):
-            if arg and arg.lower() not in str(elemRecord).lower():
-                continue
-            json_lines.append(
-                {"id": elemRecord['FELEM_ID'], "code": elemRecord['FELEM_CODE'], "tokenize": elemRecord['TOKENIZE'],
-                 "datatype": elemRecord['DATA_TYPE']})
-        self.print_json_lines(json_lines)
-
-    def do_getElement(self, arg):
-        """\ngetElement [element_name]\n"""
-
-        if not argCheck('getElement', arg, self.do_getElement.__doc__):
+        Example:
+            deleteAttribute PHONE_NUMBER
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ELEMENT": arg}
-            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ATTRIBUTE": arg}
+            parmData['ATTRIBUTE'] = parmData['ATTRIBUTE'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        deleteCnt = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_ATTR']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_ATTR'][i]['ATTR_CODE'] == parmData['ATTRIBUTE']:
+                del self.cfgData['G2_CONFIG']['CFG_ATTR'][i]
+                deleteCnt += 1
+                self.configUpdated = True
+        if deleteCnt == 0:
+            colorize_msg('Attribute not found!', 'warning')
         else:
+            colorize_msg('Successfully deleted', 'success')
 
-            felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
-            if not felemRecord:
-                colorize_msg('Element %s not found!' % parmData['ELEMENT'], 'B')
-            else:
-                self.print_json_record('{"id": %s, "code": "%s", "datatype": "%s", "tokenize": "%s"}' % (
-                    felemRecord['FELEM_ID'], felemRecord['FELEM_CODE'], felemRecord['DATA_TYPE'],
-                    felemRecord['TOKENIZE']))
 
-# ===== function and calls section =====
+# ===== template section =====
 
-    def do_listFunctions(self, arg):
-        """listFunctions [search_filter]"""
+    def do_templateAdd(self, arg):
+        """
+        Adds a feature and its attributes based on a template
 
+        Syntax:
+            templateAdd {"feature": "<name>", "template": "<template>", "behavior": "<optional-override>", "comparison": "<optional-override>}
+
+        Examples:
+            templateAdd {"feature": "customer_number", "template": "global_id"}
+            templateAdd {"feature": "customer_number", "template": "global_id", "behavior": "F1E"}
+            templateAdd {"feature": "customer_number", "template": "global_id", "behavior": "F1E", "comparison": "exact_comp"}
+
+        Notes:
+            Type "templateAdd List" to get a list of valid templates.\n
+        """
+        validTemplates = {}
+        validTemplates['GLOBAL_ID'] = {'DESCRIPTION': 'globally unique identifier (like an ssn, a credit card, or a medicare_id)',
+                                       'BEHAVIOR': ['F1', 'F1E', 'F1ES', 'A1', 'A1E', 'A1ES'],
+                                       'CANDIDATES': ['No'],
+                                       'STANDARDIZE': ['PARSE_ID'],
+                                       'EXPRESSION': ['EXPRESS_ID'],
+                                       'COMPARISON': ['ID_COMP', 'EXACT_COMP'],
+                                       'FEATURE_CLASS': 'ISSUED_ID',
+                                       'ATTRIBUTE_CLASS': 'IDENTIFIER',
+                                       'ELEMENTS': [{'element': 'ID_NUM', 'expressed': 'No', 'compared': 'no', 'display': 'Yes'},
+                                                    {'element': 'ID_NUM_STD', 'expressed': 'Yes', 'compared': 'yes', 'display': 'No'}],
+                                       'ATTRIBUTES': [{'attribute': '<feature>', 'element': 'ID_NUM', 'required': 'Yes'}]}
+
+        validTemplates['STATE_ID'] = {'DESCRIPTION': 'state issued identifier (like a drivers license)',
+                                      'BEHAVIOR': ['F1', 'F1E', 'F1ES', 'A1', 'A1E', 'A1ES'],
+                                      'CANDIDATES': ['No'],
+                                      'STANDARDIZE': ['PARSE_ID'],
+                                      'EXPRESSION': ['EXPRESS_ID'],
+                                      'COMPARISON': ['ID_COMP'],
+                                      'FEATURE_CLASS': 'ISSUED_ID',
+                                      'ATTRIBUTE_CLASS': 'IDENTIFIER',
+                                      'ELEMENTS': [{'element': 'ID_NUM', 'expressed': 'No', 'compared': 'no', 'display': 'Yes'},
+                                                   {'element': 'STATE', 'expressed': 'No', 'compared': 'yes', 'display': 'Yes'},
+                                                   {'element': 'ID_NUM_STD', 'expressed': 'Yes', 'compared': 'yes', 'display': 'No'}],
+                                      'ATTRIBUTES': [{'attribute': '<feature>_NUMBER', 'element': 'ID_NUM', 'required': 'Yes'},
+                                                     {'attribute': '<feature>_STATE', 'element': 'STATE', 'required': 'No'}]}
+
+        validTemplates['COUNTRY_ID'] = {'DESCRIPTION': 'country issued identifier (like a passport)',
+                                        'BEHAVIOR': ['F1', 'F1E', 'F1ES', 'A1', 'A1E', 'A1ES'],
+                                        'CANDIDATES': ['No'],
+                                        'STANDARDIZE': ['PARSE_ID'],
+                                        'EXPRESSION': ['EXPRESS_ID'],
+                                        'COMPARISON': ['ID_COMP'],
+                                        'FEATURE_CLASS': 'ISSUED_ID',
+                                        'ATTRIBUTE_CLASS': 'IDENTIFIER',
+                                        'ELEMENTS': [{'element': 'ID_NUM', 'expressed': 'No', 'compared': 'no', 'display': 'Yes'},
+                                                     {'element': 'COUNTRY', 'expressed': 'No', 'compared': 'yes', 'display': 'Yes'},
+                                                     {'element': 'ID_NUM_STD', 'expressed': 'Yes', 'compared': 'yes', 'display': 'No'}],
+                                        'ATTRIBUTES': [{'attribute': '<feature>_NUMBER', 'element': 'ID_NUM', 'required': 'Yes'},
+                                                       {'attribute': '<feature>_COUNTRY', 'element': 'COUNTRY', 'required': 'No'}]}
+
+        if arg and arg.upper() == 'LIST':
+            print()
+            for template in validTemplates:
+                print('\t', template, '-', validTemplates[template]['DESCRIPTION'])
+                print('\t\tbehaviors:', validTemplates[template]['BEHAVIOR'])
+                print('\t\tcomparisons:', validTemplates[template]['COMPARISON'])
+                print()
+            return
+
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        feature = parmData['FEATURE'].upper() if 'FEATURE' in parmData else None
+        template = parmData['TEMPLATE'].upper() if 'TEMPLATE' in parmData else None
+        behavior = parmData['BEHAVIOR'].upper() if 'BEHAVIOR' in parmData else None
+        comparison = parmData['COMPARISON'].upper() if 'COMPARISON' in parmData else None
+
+        standardize = parmData['STANDARDIZE'].upper() if 'STANDARDIZE' in parmData else None
+        expression = parmData['EXPRESSION'].upper() if 'EXPRESSION' in parmData else None
+        candidates = parmData['CANDIDATES'].upper() if 'CANDIDATES' in parmData else None
+
+        if not feature:
+            colorize_msg('A new feature name is required', 'error')
+            return
+        if self.getRecord('CFG_FTYPE', 'FTYPE_CODE', feature):
+            colorize_msg('Feature already exists!', 'warning')
+            return
+
+        if not template:
+            colorize_msg('A valid template name is required', 'error')
+            return
+        if template not in validTemplates:
+            colorize_msg('template name supplied is not valid', 'error')
+            return
+
+        if not behavior:
+            behavior = validTemplates[template]['BEHAVIOR'][0]
+        if behavior not in validTemplates[template]['BEHAVIOR']:
+            colorize_msg('behavior code supplied is not valid for template', 'error')
+            return
+
+        if not comparison:
+            comparison = validTemplates[template]['COMPARISON'][0]
+        if comparison not in validTemplates[template]['COMPARISON']:
+            colorize_msg('comparison code supplied is not valid for template', 'error')
+            return
+
+        if not standardize:
+            standardize = validTemplates[template]['STANDARDIZE'][0]
+        if standardize not in validTemplates[template]['STANDARDIZE']:
+            colorize_msg('standardize code supplied is not valid for template', 'error')
+            return
+
+        if not expression:
+            expression = validTemplates[template]['EXPRESSION'][0]
+        if expression not in validTemplates[template]['EXPRESSION']:
+            colorize_msg('expression code supplied is not valid for template', 'error')
+            return
+
+        if not candidates:
+            candidates = validTemplates[template]['CANDIDATES'][0]
+        if candidates not in validTemplates[template]['CANDIDATES']:
+            colorize_msg('candidates setting supplied is not valid for template', 'error')
+            return
+
+        # values that can't be overridden
+        featureClass = validTemplates[template]['FEATURE_CLASS']
+        attributeClass = validTemplates[template]['ATTRIBUTE_CLASS']
+
+        # exact comp corrections
+        if comparison == 'EXACT_COMP':
+            standardize = ''
+            expression = ''
+            candidates = 'Yes'
+
+        # build the feature
+        featureData = {'feature': feature,
+                       'behavior': behavior,
+                       'class': featureClass,
+                       'candidates': candidates,
+                       'standardize': standardize,
+                       'expression': expression,
+                       'comparison': comparison,
+                       'elementList': []}
+        for elementDict in validTemplates[template]['ELEMENTS']:
+            if not expression:
+                elementDict['expressed'] = 'No'
+            if not standardize:
+                if elementDict['display'] == 'Yes':
+                    elementDict['compared'] = 'Yes'
+                else:
+                    elementDict['compared'] = 'No'
+            featureData['elementList'].append(elementDict)
+
+        featureParm = json.dumps(featureData)
+        colorize_msg(f'addFeature {featureParm}', 'dim')
+        self.do_addFeature(featureParm)
+
+        # build the attributes
+        for attributeDict in validTemplates[template]['ATTRIBUTES']:
+            attributeDict['attribute'] = attributeDict['attribute'].replace('<feature>', feature)
+
+            attributeData = {'attribute': attributeDict['attribute'].upper(),
+                             'class': attributeClass,
+                             'feature': feature,
+                             'element': attributeDict['element'].upper(),
+                             'required': attributeDict['required']}
+
+            attributeParm = json.dumps(attributeData)
+            colorize_msg(f'addAttribute {attributeParm}', 'dim')
+            self.do_addAttribute(attributeParm)
+
+        return
+
+
+# ===== supporting codes =====
+
+    def do_referenceCodes(self, arg):
+        """
+        Returns the list of internal reference codes
+
+        Syntax:
+            referenceCodes [optional_code_type]
+
+        Notes:
+            reference code types include:
+                matchLevels
+                behaviorCodes
+                featureClasses
+                attributeClasses
+        """
+        arg = self.check_arg_for_list_format(arg)
+        if arg:
+            arg = arg.upper()
+
+        if not arg or arg in 'MATCHLEVELS':
+            json_lines = []
+            for rtypeRecord in sorted(self.getRecordList('CFG_RTYPE'), key=lambda k: k['RTYPE_ID']):
+                if arg and arg.lower() not in str(rtypeRecord).lower():
+                    continue
+                json_lines.append({"level": rtypeRecord["RTYPE_ID"], "code": rtypeRecord["RTYPE_CODE"],
+                                   "class": self.getRecord("CFG_RCLASS", "RCLASS_ID", rtypeRecord["RCLASS_ID"])[
+                                       "RCLASS_DESC"]})
+            self.print_json_lines(json_lines, 'Match Levels')
+
+
+        if not arg or arg in 'BEHAVIORCODES':
+            json_lines = []
+            for code in self.valid_behavior_codes:
+                if code.startswith('NAME'):
+                    desc = 'Controlled behavior used only for names'
+                else:
+                    if code.startswith('A1'):
+                        desc = 'Absolutely 1'
+                    elif code.startswith('F1'):
+                        desc = 'Frequency 1'
+                    elif code.startswith('FF'):
+                        desc = 'Frequency 1'
+                    elif code.startswith('FM'):
+                        desc = 'Frequency many'
+                    elif code.startswith('FVM'):
+                        desc = 'Frequency very many'
+                    else:
+                        desc = 'unknown'
+                    if 'E' in code:
+                        desc += ', exclusive'
+                    if 'S' in code:
+                        desc += ' and stable'
+                json_lines.append({"behaviorCode": code, "behaviorDescription": desc})
+            self.print_json_lines(json_lines, 'Behavior Codes')
+
+        if not arg or arg in 'FEATURECLASS':
+            json_lines = []
+            for fclassRecord in sorted(self.getRecordList('CFG_FCLASS'), key=lambda k: k['FCLASS_ID']):
+                json_lines.append({"class": fclassRecord['FCLASS_CODE'], "id": fclassRecord['FCLASS_ID']})
+            self.print_json_lines(json_lines, 'Feature Classes')
+
+        if not arg or arg in 'ATTRIBUTECLASS':
+            json_lines = []
+            for attrClass in self.attributeClassList:
+                json_lines.append({"attributeClass": attrClass})
+            self.print_json_lines(json_lines, 'Attribute Classes')
+
+    def do_listStandarizeFunctions(self, arg):
+        """
+        Returns the list of standardization functions
+
+        Syntax:
+            listStandarizeFunctions [optional_search_filter] [optional_output_format]
+        """
+        arg = self.check_arg_for_list_format(arg)
         json_lines = []
         for funcRecord in sorted(self.getRecordList('CFG_SFUNC'), key=lambda k: k['SFUNC_ID']):
             if arg and arg.lower() not in str(funcRecord).lower():
                 continue
-            json_lines.append({"id": funcRecord["SFUNC_ID"], "function": funcRecord["SFUNC_CODE"]})
+            json_lines.append({"id": funcRecord["SFUNC_ID"], "function": funcRecord["SFUNC_CODE"], \
+                "connectStr": funcRecord["CONNECT_STR"]})
         if json_lines:
-            self.print_json_lines(json_lines, 'Standardization Functions')
+            self.print_json_lines(json_lines)
 
+    def do_listExpressionFunctions(self, arg):
+        """
+        Returns the list of expression functions
+
+        Syntax:
+            listExpressionFuncstions [optional_search_filter] [optional_output_format]
+        """
+        arg = self.check_arg_for_list_format(arg)
         json_lines = []
         for funcRecord in sorted(self.getRecordList('CFG_EFUNC'), key=lambda k: k['EFUNC_ID']):
             if arg and arg.lower() not in str(funcRecord).lower():
                 continue
-            json_lines.append({"id": funcRecord["EFUNC_ID"], "function": funcRecord["EFUNC_CODE"]})
+            json_lines.append({"id": funcRecord["EFUNC_ID"], "function": funcRecord["EFUNC_CODE"], \
+                "connectStr": funcRecord["CONNECT_STR"]})
         if json_lines:
-            self.print_json_lines(json_lines, 'Expression Functions')
+            self.print_json_lines(json_lines)
 
+        return
+
+    def do_listComparisonFunctions(self, arg):
+        """
+        Returns the list of comparison functions
+
+        Syntax:
+            listComparisonFunctions [optional_search_filter] [optional_output_format]
+        """
+        arg = self.check_arg_for_list_format(arg)
+        json_lines = []
+        for funcRecord in sorted(self.getRecordList('CFG_CFUNC'), key=lambda k: k['CFUNC_ID']):
+            if arg and arg.lower() not in str(funcRecord).lower():
+                continue
+            json_lines.append({"id": funcRecord["CFUNC_ID"], "function": funcRecord["CFUNC_CODE"], \
+                "connectStr": funcRecord["CONNECT_STR"],\
+                "anonSupport": funcRecord["ANON_SUPPORT"],\
+                "language": funcRecord["LANGUAGE"],\
+                "javaClassName": funcRecord["JAVA_CLASS_NAME"]})
+        if json_lines:
+            self.print_json_lines(json_lines)
+
+        return
+
+    def do_listComparisonThresholds(self, arg):
+        """
+        Returns the list of thresholds by comparison function return value
+
+        Syntax:
+            listComparisonThresholds [optional_search_filter] [optional_output_format]
+        """
+        arg = self.check_arg_for_list_format(arg)
         json_lines = []
         for funcRecord in sorted(self.getRecordList('CFG_CFUNC'), key=lambda k: k['CFUNC_ID']):
             if arg and arg.lower() not in str(funcRecord).lower():
@@ -2727,62 +2483,958 @@ class G2CmdShell(cmd.Cmd, object):
                                    "plausibleScore": cfrtnRecord["PLAUSIBLE_SCORE"],
                                    "unlikelyScore": cfrtnRecord["UN_LIKELY_SCORE"]})
         if json_lines:
-            self.print_json_lines(json_lines, 'Comparison Functions')
+            self.print_json_lines(json_lines)
         print()
 
-    def do_addStandardizeFunc(self, arg):
+    def do_addStandardizeFunction(self, arg):
         """
-        \n\taddStandardizeFunc {"function":"<function_name>", "connectStr":"<plugin_base_name>"}
-        \n\n\taddStandardizeFunc {"function":"STANDARDIZE_COUNTRY", "connectStr":"g2StdCountry"}\n
+        Adds a new standardization function
+
+        Syntax:
+            addStandardizeFunc {"function":"<function_name>", "connectStr":"<plugin_base_name>"}
+
+        Example:
+            addStandardizeFunc {"function":"STANDARDIZE_COUNTRY", "connectStr":"g2StdCountry"}
+
+        Caution:
+            Added a new function requires a plugin to be programmed!
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            parmData['FUNCTION'] = parmData['FUNCTION'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        if self.getRecord('CFG_SFUNC', 'SFUNC_CODE', parmData['FUNCTION']):
+            colorize_msg('Function already exists!', 'warning')
+            return
+
+        if not parmData.get('FUNCLIB'):
+            parmData['FUNCLIB'] = 'g2func_lib'
+        if not parmData.get('VERSION'):
+            parmData['VERSION'] = '1'
+        if not parmData.get('CONNECTSTR'):
+            colorize_msg('ConnectStr must be specified.', 'error')
+            return
+
+        maxID = []
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_SFUNC'])):
+            maxID.append(self.cfgData['G2_CONFIG']['CFG_SFUNC'][i]['SFUNC_ID'])
+
+        sfuncID = 0
+        if 'ID' in parmData:
+            sfuncID = int(parmData['ID'])
+        else:
+            sfuncID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
+
+        newRecord = {}
+        newRecord['SFUNC_ID'] = sfuncID
+        newRecord['SFUNC_CODE'] = parmData['FUNCTION']
+        newRecord['SFUNC_DESC'] = parmData['FUNCTION']
+        newRecord['FUNC_LIB'] = parmData['FUNCLIB']
+        newRecord['FUNC_VER'] = parmData['VERSION']
+        newRecord['CONNECT_STR'] = parmData['CONNECTSTR']
+        self.cfgData['G2_CONFIG']['CFG_SFUNC'].append(newRecord)
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+        if self.doDebug:
+            debug(newRecord)
+
+    def do_addExpressionFunction(self, arg):
+        """
+        Adds a new expression function
+
+        Syntax:
+            addExpressionFunc {"function":"<function_name>", "connectStr":"<plugin_base_name>"}
+
+        Example:
+            addExpressionFunc {"function":"FEAT_BUILDER", "connectStr":"g2FeatBuilder"}
+
+        Caution:
+            Adding a new function requires a plugin to be programmed!
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            parmData['FUNCTION'] = parmData['FUNCTION'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        if self.getRecord('CFG_EFUNC', 'EFUNC_CODE', parmData['FUNCTION']):
+            colorize_msg('Function already exists!', 'warning')
+            return
+
+        if not parmData.get('FUNCLIB'):
+            parmData['FUNCLIB'] = 'g2func_lib'
+        if not parmData.get('VERSION'):
+            parmData['VERSION'] = '1'
+        if not parmData.get('CONNECTSTR'):
+            colorize_msg('ConnectStr must be specified.', 'error')
+            return
+
+        maxID = []
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_EFUNC'])):
+            maxID.append(self.cfgData['G2_CONFIG']['CFG_EFUNC'][i]['EFUNC_ID'])
+
+        efuncID = 0
+        if 'ID' in parmData:
+            efuncID = int(parmData['ID'])
+        else:
+            efuncID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
+
+        newRecord = {}
+        newRecord['EFUNC_ID'] = efuncID
+        newRecord['EFUNC_CODE'] = parmData['FUNCTION']
+        newRecord['EFUNC_DESC'] = parmData['FUNCTION']
+        newRecord['FUNC_LIB'] = parmData['FUNCLIB']
+        newRecord['FUNC_VER'] = parmData['VERSION']
+        newRecord['CONNECT_STR'] = parmData['CONNECTSTR']
+        self.cfgData['G2_CONFIG']['CFG_EFUNC'].append(newRecord)
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+        if self.doDebug:
+            debug(newRecord)
+
+    def do_addComparisonFunction(self, arg):
+        """
+        Adds a new comparison function
+
+        Syntax:
+            addComparisonFunc {"function":"<function_name>", "connectStr":"<plugin_base_name>"}
+
+        Example:
+            addComparisonFunc {"function":"EMAIL_COMP", "connectStr":"g2EmailComp"}
+
+        Caution:
+            Adding a new function requires a plugin to be programmed!
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            parmData['FUNCTION'] = parmData['FUNCTION'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        if self.getRecord('CFG_CFUNC', 'CFUNC_CODE', parmData['FUNCTION']):
+            colorize_msg('Function already exists!', 'warning')
+            return
+
+        if not parmData.get('FUNCLIB'):
+            parmData['FUNCLIB'] = 'g2func_lib'
+        if not parmData.get('VERSION'):
+            parmData['VERSION'] = '1'
+        if not parmData.get('CONNECTSTR'):
+            colorize_msg('ConnectStr must be specified.', 'error')
+            return
+        if not parmData.get('ANONSUPPORT'):
+            parmData['ANONSUPPORT'] = 'No'
+        if not parmData.get('LANGUAGE'):
+            parmData['LANGUAGE'] = ''
+        if not parmData.get('JAVACLASSNAME'):
+            parmData['JAVACLASSNAME'] = ''
+
+        maxID = []
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFUNC'])):
+            maxID.append(self.cfgData['G2_CONFIG']['CFG_CFUNC'][i]['CFUNC_ID'])
+
+        cfuncID = 0
+        if 'ID' in parmData:
+            cfuncID = int(parmData['ID'])
+        else:
+            cfuncID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
+
+        newRecord = {}
+        newRecord['CFUNC_ID'] = cfuncID
+        newRecord['CFUNC_CODE'] = parmData['FUNCTION']
+        newRecord['CFUNC_DESC'] = parmData['FUNCTION']
+        newRecord['FUNC_LIB'] = parmData['FUNCLIB']
+        newRecord['FUNC_VER'] = parmData['VERSION']
+        newRecord['CONNECT_STR'] = parmData['CONNECTSTR']
+        newRecord['ANON_SUPPORT'] = parmData['ANONSUPPORT']
+        newRecord['LANGUAGE'] = parmData['LANGUAGE']
+        newRecord['JAVA_CLASS_NAME'] = parmData['JAVACLASSNAME']
+        self.cfgData['G2_CONFIG']['CFG_CFUNC'].append(newRecord)
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+        if self.doDebug:
+            debug(newRecord)
+
+    def do_addComparisonThreshold(self, arg):
+        """
+        Adds a new comparison function threshold setting
+
+        Syntax:
+            addComparisonThreshold [json configuration]
+
+        Notes:
+            - You can listComparisonThresholds to see what the json configuration is.
+            - The best way to change one is to capture it's json from the list, then delete and re-add it.
+            - You can override the thresholds for specific features by specifying the specific feature instead of all.
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            parmData['FUNCTION'] = parmData['FUNCTION'].upper()
+            parmData['SCORENAME'] = parmData['SCORENAME'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_CODE', parmData['FUNCTION'])
+        if not cfuncRecord:
+            colorize_msg('Function does not exist!', 'error')
+            return
+        cfuncID = cfuncRecord['CFUNC_ID']
+
+        ftypeID = 0
+        if 'FEATURE' in parmData and parmData['FEATURE'].upper() != 'ALL':
+            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+            if not ftypeRecord:
+                colorize_msg('Feature does not exist!', 'error')
+                return
+            ftypeID = ftypeRecord['FTYPE_ID']
+
+        #  check for duplicated return codes
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFRTN']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFUNC_ID'] == cfuncID and \
+                    self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['FTYPE_ID'] == ftypeID and \
+                    self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFUNC_RTNVAL'] == parmData['SCORENAME']:
+                colorize_msg('Comparison function return value for feature already exists!', 'warning')
+                return
+
+            # just remove the id if duplicated.  They likely just cut and pasted it.
+            if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFRTN_ID'] == parmData.get('ID', 0):
+                parmData['ID'] = 0
+
+        maxID = []
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFRTN'])):
+            maxID.append(self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFRTN_ID'])
+
+        cfrtnID = 0
+        if parmData.get('ID', 0) != 0:
+            cfrtnID = int(parmData['ID'])
+        else:
+            cfrtnID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
+
+        execOrder = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFRTN'])):
+            if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFUNC_ID'] == cfuncID and self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['FTYPE_ID'] == ftypeID:
+                if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['EXEC_ORDER'] > execOrder:
+                    execOrder = self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['EXEC_ORDER']
+        execOrder = execOrder + 1
+
+        sameScore = 100
+        closeScore = 90
+        likelyScore = 80
+        plausibleScore = 70
+        unlikelyScore = 60
+
+        if 'SAMESCORE' in parmData:
+            sameScore = int(parmData['SAMESCORE'])
+        if 'CLOSESCORE' in parmData:
+            closeScore = int(parmData['CLOSESCORE'])
+        if 'LIKELYSCORE' in parmData:
+            likelyScore = int(parmData['LIKELYSCORE'])
+        if 'PLAUSIBLESCORE' in parmData:
+            plausibleScore = int(parmData['PLAUSIBLESCORE'])
+        if 'UNLIKELYSCORE' in parmData:
+            unlikelyScore = int(parmData['UNLIKELYSCORE'])
+
+        newRecord = {}
+        newRecord['CFRTN_ID'] = cfrtnID
+        newRecord['CFUNC_ID'] = cfuncID
+        newRecord['FTYPE_ID'] = ftypeID
+        newRecord['CFUNC_RTNVAL'] = parmData['SCORENAME']
+        newRecord['EXEC_ORDER'] = execOrder
+        newRecord['SAME_SCORE'] = sameScore
+        newRecord['CLOSE_SCORE'] = closeScore
+        newRecord['LIKELY_SCORE'] = likelyScore
+        newRecord['PLAUSIBLE_SCORE'] = plausibleScore
+        newRecord['UN_LIKELY_SCORE'] = unlikelyScore
+        self.cfgData['G2_CONFIG']['CFG_CFRTN'].append(newRecord)
+        self.configUpdated = True
+        colorize_msg('Comparison threshold Successfully added!', 'success')
+        if self.doDebug:
+            debug(newRecord)
+
+    def do_deleteComparisonThreshold(self, arg):
+        """
+        Deletes a comparision threshold
+
+        Syntax:
+           deleteComparisonThreshold [id]
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": int(arg)}
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        deleteCnt = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFRTN']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFRTN_ID'] == parmData['ID']:
+                del self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]
+                deleteCnt += 1
+                self.configUpdated = True
+        if deleteCnt == 0:
+            colorize_msg('Record not found', 'caution')
+        else:
+            colorize_msg('Successfully deleted!', 'success')
+
+
+# ===== element commands =====
+
+    def getElementJson(self, elementRecord):
+        jsonString = '{'
+        jsonString += '"id": "%s"' % elementRecord['FELEM_ID']
+        jsonString += ', "id": "%s"' % elementRecord['FELEM_CODE']
+        jsonString += ', "datatype": "%s"' % elementRecord['DATA_TYPE']
+        jsonString += ', "tokenize": "%s"' % elementRecord['TOKENIZE']
+        jsonString += '}'
+
+        return json.loads(jsonString)
+
+
+    def do_listElements(self, arg):
+        """
+        Returns the list of feature elements
+
+        Syntax:
+            listElements [optional_search_filter] [optional_output_format]
+        """
+        arg = self.check_arg_for_list_format(arg)
+        json_lines = []
+        for felemRecord in sorted(self.getRecordList('CFG_FELEM'), key=lambda k: k['FELEM_ID']):
+            if arg and arg.lower() not in str(felemRecord).lower():
+                continue
+            json_lines.append(self.getElementJson(felemRecord))
+        self.print_json_lines(json_lines)
+
+    def do_getElement(self, arg):
+        """\ngetElement [element_name]\n"""
+
+        arg = self.check_arg_for_get_format(arg)
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ELEMENT": arg}
+            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
+        if not felemRecord:
+            colorize_msg('Element not found!', 'error')
+        else:
+            self.print_json_record(self.getElementJson(felemRecord))
+
+    def do_addElement(self, arg):
+        """
+        \n\taddElement {"element": "<element_name>"}
+        \n\n\taddElement {"element": "<element_name>", "tokenize": "no", "datatype": "no"}
+        \n\n\tFor additional example structures, use getFeature or listFeatures\n
         """
 
-        if not argCheck('addStandardizeFunc', arg, self.do_addStandardizeFunc.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ELEMENT": arg}
+            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        if self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT']):
+            colorize_msg('Element already exists!', 'error')
+            return
+        else:
+
+            # default for missing values
+            if 'DATATYPE' not in parmData or len(parmData['DATATYPE'].strip()) == 0:
+                parmData['DATATYPE'] = 'string'
+            else:
+                if parmData['DATATYPE'].upper() not in ('DATE', 'DATETIME', 'JSON', 'NUMBER', 'STRING'):
+                    colorize_msg('dataType must be DATE, DATETIME, JSON, NUMBER, or STRING', 'error')
+                    return
+                parmData['DATATYPE'] = parmData['DATATYPE'].lower()
+
+            if 'TOKENIZE' not in parmData or len(parmData['TOKENIZE'].strip()) == 0:
+                parmData['TOKENIZE'] = 'No'
+            else:
+                if parmData['TOKENIZE'] not in ('0', '1', 'No', 'Yes'):
+                    colorize_msg('tokenize value must be Yes or No', 'error')
+                    return
+
+            maxID = []
+            for i in range(len(self.cfgData['G2_CONFIG']['CFG_FELEM'])):
+                maxID.append(self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID'])
+
+            if 'ID' in parmData:
+                felemID = int(parmData['ID'])
+            else:
+                felemID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
+
+            newRecord = {}
+            newRecord['FELEM_ID'] = felemID
+            newRecord['FELEM_CODE'] = parmData['ELEMENT']
+            newRecord['FELEM_DESC'] = parmData['ELEMENT']
+            newRecord['TOKENIZE'] = parmData['TOKENIZE']
+            newRecord['DATA_TYPE'] = parmData['DATATYPE']
+            self.cfgData['G2_CONFIG']['CFG_FELEM'].append(newRecord)
+            self.configUpdated = True
+            colorize_msg('Successfully added!', 'success')
+            if self.doDebug:
+                debug(newRecord)
+
+    def do_deleteElement(self, arg):
+        """\ndeleteElement {"feature": "<feature_name>", "element": "<element_name>"}\n"""
+
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ELEMENT": arg}
+            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
+        if not felemRecord:
+            colorize_msg('Element does not exist: %s. Use listElements to see valid elements.' % parmData['ELEMENT'],
+                              'B')
+            return
+
+        usedIn = []
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_FBOM'])):
+            if int(self.cfgData['G2_CONFIG']['CFG_FBOM'][i]['FELEM_ID']) == felemRecord['FELEM_ID']:
+                for j in range(len(self.cfgData['G2_CONFIG']['CFG_FTYPE'])):
+                    if int(self.cfgData['G2_CONFIG']['CFG_FTYPE'][j]['FTYPE_ID']) == \
+                            self.cfgData['G2_CONFIG']['CFG_FBOM'][i]['FTYPE_ID']:
+                        usedIn.append(self.cfgData['G2_CONFIG']['CFG_FTYPE'][j]['FTYPE_CODE'])
+        if usedIn:
+            colorize_msg(
+                'Can\'t delete %s, it is used in these feature(s): %s' % (parmData['ELEMENT'], usedIn), 'B')
+            return
+        else:
+            deleteCnt = 0
+            for i in range(len(self.cfgData['G2_CONFIG']['CFG_FELEM'])):
+                if int(self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID']) == felemRecord['FELEM_ID']:
+                    del self.cfgData['G2_CONFIG']['CFG_FELEM'][i]
+                    deleteCnt = 1
+                    self.configUpdated = True
+                    break
+
+            if deleteCnt == 0:
+                print('\nRecord not found!\n')
+            else:
+                colorize_msg('Successfully deleted!', 'success')
+
+
+    # Compatibility version commands
+
+    def do_verifyCompatibilityVersion(self, arg):
+        """
+        Verify if the current configuration is compatible with a specific version number
+
+        Examples:
+            verifyCompatibilityVersion {"expectedVersion": "2"}
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        this_version = self.cfgData['G2_CONFIG']['CONFIG_BASE_VERSION']['COMPATIBILITY_VERSION']['CONFIG_VERSION']
+        if this_version != parmData['EXPECTEDVERSION']:
+            colorize_msg(f"Incompatible! This is version {this_version}", 'error')
+            if self.isInteractive is False:
+                raise Exception('Incorrect compatibility version.')
+        else:
+            colorize_msg(f"This version is compatible", 'success')
+
+    def do_updateCompatibilityVersion(self, arg):
+        """
+        Update the compatiblilty version of this configuration
+
+        Examples:
+            updateCompatibilityVersion {"fromVersion": "1", "toVersion": "2"}
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        this_version = self.cfgData['G2_CONFIG']['CONFIG_BASE_VERSION']['COMPATIBILITY_VERSION']['CONFIG_VERSION']
+        if this_version != parmData['FROMVERSION']:
+            colorize_msg(f"From version mismatch. This is version {this_version}", 'error')
+            return
+
+        self.cfgData['G2_CONFIG']['CONFIG_BASE_VERSION']['COMPATIBILITY_VERSION']['CONFIG_VERSION'] = parmData['TOVERSION']
+        self.configUpdated = True
+        colorize_msg('Compatibility version successfully changed!', 'success')
+
+    def do_getCompatibilityVersion(self, arg):
+        """
+        Retrive the compatiblity version of this configuration
+
+        Syntax:
+            getCompatibilityVersion
+        """
+        try:
+            this_version = self.cfgData['G2_CONFIG']['CONFIG_BASE_VERSION']['COMPATIBILITY_VERSION']['CONFIG_VERSION']
+            colorize_msg(f'Compatibility version is {this_version}', 'success')
+        except KeyError:
+            colorize_msg('Could not retrieve compatibility version', 'error')
+
+
+# ===== to be deprecated =====
+
+    def do_addStandardizeFunc(self, arg):
+        self.do_addStandardizeFunction(arg)
+
+    def do_addExpressionFunc(self, arg):
+        self.do_addExpressionFunction(arg)
+
+    def do_addComparisonFunc(self, arg):
+        self.do_addComparisonFunction(arg)
+
+    def do_addFeatureComparisonElement(self, arg):
+        """\naddFeatureComparisonElement {"feature": "<feature_name>", "element": "<element_name>"}\n"""
+
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
             parmData = dictKeysUpper(json.loads(arg))
-            parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
+            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
 
-            if self.getRecord('CFG_SFUNC', 'SFUNC_CODE', parmData['FUNCTION']):
-                colorize_msg('Function %s already exists!' % parmData['FUNCTION'], 'B')
+        # lookup feature and error if it doesn't exist
+        ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+        if not ftypeRecord:
+            colorize_msg('Feature not found!', 'error')
+            return
+        ftypeID = ftypeRecord['FTYPE_ID']
+
+        # lookup element and error if it doesn't exist
+        felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
+        if not felemRecord:
+            colorize_msg('Element not found!', 'error')
+            return
+        felemID = felemRecord['FELEM_ID']
+
+        # find the comparison function call
+        cfcallRecord = self.getRecord('CFG_CFCALL', 'FTYPE_ID', ftypeID)
+        if not cfcallRecord:
+            colorize_msg('Comparison function for feature not found!', 'error')
+            return
+        cfcallID = cfcallRecord['CFCALL_ID']
+
+        # check to see if the element is already in the feature
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFBOM']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_CFBOM'][i]['CFCALL_ID'] == cfcallID and \
+                    self.cfgData['G2_CONFIG']['CFG_CFBOM'][i]['FELEM_ID'] == felemID:
+                colorize_msg('Comparison function for feature already contains element!', 'error')
                 return
-            else:
 
-                # default for missing values
+        # add the feature element
+        cfbomExecOrder = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFBOM'])):
+            if self.cfgData['G2_CONFIG']['CFG_CFBOM'][i]['CFCALL_ID'] == cfcallID:
+                if self.cfgData['G2_CONFIG']['CFG_CFBOM'][i]['EXEC_ORDER'] > cfbomExecOrder:
+                    cfbomExecOrder = self.cfgData['G2_CONFIG']['CFG_CFBOM'][i]['EXEC_ORDER']
+        cfbomExecOrder = cfbomExecOrder + 1
+        newRecord = {}
+        newRecord['CFCALL_ID'] = cfcallID
+        newRecord['EXEC_ORDER'] = cfbomExecOrder
+        newRecord['FTYPE_ID'] = ftypeID
+        newRecord['FELEM_ID'] = felemID
+        self.cfgData['G2_CONFIG']['CFG_CFBOM'].append(newRecord)
+        if self.doDebug:
+            debug(newRecord, 'CFBOM build')
 
-                if 'FUNCLIB' not in parmData or len(parmData['FUNCLIB'].strip()) == 0:
-                    parmData['FUNCLIB'] = 'g2func_lib'
-                if 'VERSION' not in parmData or len(parmData['VERSION'].strip()) == 0:
-                    parmData['VERSION'] = '1'
-                if 'CONNECTSTR' not in parmData or len(parmData['CONNECTSTR'].strip()) == 0:
-                    colorize_msg('ConnectStr value not specified.', 'B')
-                    return
+        # we made it!
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
 
-                maxID = []
-                for i in range(len(self.cfgData['G2_CONFIG']['CFG_SFUNC'])):
-                    maxID.append(self.cfgData['G2_CONFIG']['CFG_SFUNC'][i]['SFUNC_ID'])
+    def do_addFeatureDistinctCallElement(self, arg):
+        """\naddFeatureDistinctCallElement {"feature": "<feature_name>", "element": "<element_name>"}\n"""
 
-                sfuncID = 0
-                if 'ID' in parmData:
-                    sfuncID = int(parmData['ID'])
-                else:
-                    sfuncID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
 
-                newRecord = {}
-                newRecord['SFUNC_ID'] = sfuncID
-                newRecord['SFUNC_CODE'] = parmData['FUNCTION']
-                newRecord['SFUNC_DESC'] = parmData['FUNCTION']
-                newRecord['FUNC_LIB'] = parmData['FUNCLIB']
-                newRecord['FUNC_VER'] = parmData['VERSION']
-                newRecord['CONNECT_STR'] = parmData['CONNECTSTR']
-                self.cfgData['G2_CONFIG']['CFG_SFUNC'].append(newRecord)
-                self.configUpdated = True
-                colorize_msg('Successfully added!', 'B')
-                if self.doDebug:
-                    debug(newRecord)
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
+            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        # lookup feature and error if it doesn't exist
+        ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+        if not ftypeRecord:
+            colorize_msg('Feature not found!', 'error')
+            return
+        ftypeID = ftypeRecord['FTYPE_ID']
+
+        # lookup element and error if it doesn't exist
+        felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
+        if not felemRecord:
+            colorize_msg('Element not found!', 'error')
+            return
+        felemID = felemRecord['FELEM_ID']
+
+        # find the distinct function call
+        dfcallRecord = self.getRecord('CFG_DFCALL', 'FTYPE_ID', ftypeID)
+        if not dfcallRecord:
+            colorize_msg('Distinct function for feature not found!', 'error')
+            return
+        dfcallID = dfcallRecord['DFCALL_ID']
+
+        # check to see if the element is already in the feature
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_DFBOM']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_DFBOM'][i]['DFCALL_ID'] == dfcallID and \
+                    self.cfgData['G2_CONFIG']['CFG_DFBOM'][i]['FELEM_ID'] == felemID:
+                colorize_msg('Distinct function call already contains element!', 'warning')
+                return
+
+        # add the feature element
+        dfbomExecOrder = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_DFBOM'])):
+            if self.cfgData['G2_CONFIG']['CFG_DFBOM'][i]['DFCALL_ID'] == dfcallID:
+                if self.cfgData['G2_CONFIG']['CFG_DFBOM'][i]['EXEC_ORDER'] > dfbomExecOrder:
+                    dfbomExecOrder = self.cfgData['G2_CONFIG']['CFG_DFBOM'][i]['EXEC_ORDER']
+        dfbomExecOrder = dfbomExecOrder + 1
+        newRecord = {}
+        newRecord['DFCALL_ID'] = dfcallID
+        newRecord['EXEC_ORDER'] = dfbomExecOrder
+        newRecord['FTYPE_ID'] = ftypeID
+        newRecord['FELEM_ID'] = felemID
+        self.cfgData['G2_CONFIG']['CFG_DFBOM'].append(newRecord)
+        if self.doDebug:
+            debug(newRecord, 'DFBOM build')
+
+        # we made it!
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+
+    def do_addFeatureComparison(self, arg):
+        """
+        \n\taddFeatureComparison {"feature": "<feature_name>", "comparison": "<comparison_function>", "elementList": ["<element_detail(s)"]}
+        '\n\n\taddFeatureComparison {"feature":"testFeat", "comparison":"exact_comp", "elementlist": [{"element": "test"}]}\n
+        """
+
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
+            if 'ELEMENTLIST' not in parmData or len(parmData['ELEMENTLIST']) == 0:
+                raise ValueError('Element list is required!')
+            if type(parmData['ELEMENTLIST']) is not list:
+                raise ValueError(
+                    'Element list should be specified as: "elementlist": ["<values>"]\n\n\tNote the [ and ]')
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        # lookup feature and error if it doesn't exist
+        ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+        if not ftypeRecord:
+            colorize_msg('Feature not found!', 'error')
+            return
+        ftypeID = ftypeRecord['FTYPE_ID']
+
+        cfuncID = 0  # comparison function
+        if 'COMPARISON' not in parmData or len(parmData['COMPARISON']) == 0:
+            colorize_msg('Comparison function not specified!', 'error')
+            return
+        parmData['COMPARISON'] = parmData['COMPARISON'].upper()
+        cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_CODE', parmData['COMPARISON'])
+        if cfuncRecord:
+            cfuncID = cfuncRecord['CFUNC_ID']
+        else:
+            colorize_msg('Invalid comparison function code', 'error')
+            return
+
+        # ensure we have elements
+        elementCount = 0
+        for element in parmData['ELEMENTLIST']:
+            elementCount += 1
+            elementRecord = dictKeysUpper(element)
+            elementRecord['ELEMENT'] = elementRecord['ELEMENT'].upper()
+            felemID = 0
+            for i in range(len(self.cfgData['G2_CONFIG']['CFG_FELEM'])):
+                if self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_CODE'] == elementRecord['ELEMENT']:
+                    felemID = self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID']
+                    break
+            if felemID == 0:
+                colorize_msg(f"Element does not exist: {elementRecord['ELEMENT']}", 'error')
+                return
+        if elementCount == 0:
+            colorize_msg('No elements specified for comparison', 'error')
+            return
+
+        # add the comparison call
+        cfcallID = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFCALL'])):
+            if self.cfgData['G2_CONFIG']['CFG_CFCALL'][i]['CFCALL_ID'] > cfcallID:
+                cfcallID = self.cfgData['G2_CONFIG']['CFG_CFCALL'][i]['CFCALL_ID']
+        cfcallID = cfcallID + 1 if cfcallID >= 1000 else 1000
+        newRecord = {}
+        newRecord['CFCALL_ID'] = cfcallID
+        newRecord['CFUNC_ID'] = cfuncID
+        newRecord['EXEC_ORDER'] = 1
+        newRecord['FTYPE_ID'] = ftypeID
+        self.cfgData['G2_CONFIG']['CFG_CFCALL'].append(newRecord)
+        if self.doDebug:
+            debug(newRecord, 'CFCALL build')
+
+        # add elements
+        cfbomOrder = 0
+        for element in parmData['ELEMENTLIST']:
+            cfbomOrder += 1
+            elementRecord = dictKeysUpper(element)
+
+            # lookup
+            elementRecord['ELEMENT'] = elementRecord['ELEMENT'].upper()
+            felemID = 0
+            for i in range(len(self.cfgData['G2_CONFIG']['CFG_FELEM'])):
+                if self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_CODE'] == elementRecord['ELEMENT']:
+                    felemID = self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID']
+                    break
+
+            # add to comparison bom if any
+            newRecord = {}
+            newRecord['CFCALL_ID'] = cfcallID
+            newRecord['EXEC_ORDER'] = cfbomOrder
+            newRecord['FTYPE_ID'] = ftypeID
+            newRecord['FELEM_ID'] = felemID
+            self.cfgData['G2_CONFIG']['CFG_CFBOM'].append(newRecord)
+            if self.doDebug:
+                debug(newRecord, 'CFBOM build')
+
+        # we made it!
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+
+    def do_setFeatureComparison(self, arg):
+        """\nsetFeatureComparison {"feature": "<feature_name>", "comparison": "<comparison_function>"}\n"""
+
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        # lookup feature and error if it doesn't exist
+        ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+        if not ftypeRecord:
+            colorize_msg('Feature not found!', 'error')
+            return
+        ftypeID = ftypeRecord['FTYPE_ID']
+
+        cfuncID = 0  # comparison function
+        if 'COMPARISON' not in parmData or len(parmData['COMPARISON']) == 0:
+            colorize_msg('Comparison function not specified!', 'error')
+            return
+        parmData['COMPARISON'] = parmData['COMPARISON'].upper()
+        cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_CODE', parmData['COMPARISON'])
+        if cfuncRecord:
+            cfuncID = cfuncRecord['CFUNC_ID']
+        else:
+            colorize_msg('Invalid comparison function code', 'error')
+            return
+
+        # set the comparison call
+        modificationMade = False
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFCALL'])):
+            if self.cfgData['G2_CONFIG']['CFG_CFCALL'][i]['FTYPE_ID'] == ftypeID:
+                self.cfgData['G2_CONFIG']['CFG_CFCALL'][i]['CFUNC_ID'] = cfuncID
+                modificationMade = True
+        if not modificationMade:
+            colorize_msg('No previous comparison method set.  Use addFeatureComparison instead.', 'error')
+            return
+
+        # we made it!
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+
+    def do_deleteFeatureComparisonElement(self, arg):
+        """\ndeleteFeatureComparisonElement {"feature": "<feature_name>", "element": "<element_name>"}\n"""
+
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
+            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        # lookup feature and error if it doesn't exist
+        ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+        if not ftypeRecord:
+            colorize_msg('Feature not found!', 'error')
+            return
+
+        # lookup element and error if it doesn't exist
+        felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
+        if not felemRecord:
+            colorize_msg('Element not found!', 'error')
+            return
+
+        deleteCnt = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_FTYPE']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_CODE'] == parmData['FEATURE']:
+                for i1 in range(len(self.cfgData['G2_CONFIG']['CFG_CFCALL']) - 1, -1, -1):
+                    if self.cfgData['G2_CONFIG']['CFG_CFCALL'][i1]['FTYPE_ID'] == ftypeRecord['FTYPE_ID']:
+                        for i2 in range(len(self.cfgData['G2_CONFIG']['CFG_CFBOM']) - 1, -1, -1):
+                            if self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]['CFCALL_ID'] == \
+                                    self.cfgData['G2_CONFIG']['CFG_CFCALL'][i1]['CFCALL_ID'] and \
+                                    self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]['FTYPE_ID'] == ftypeRecord[
+                                'FTYPE_ID'] and self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]['FELEM_ID'] == \
+                                    felemRecord['FELEM_ID']:
+                                del self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]
+                                deleteCnt += 1
+                                self.configUpdated = True
+
+        if deleteCnt == 0:
+            colorize_msg('Record not found!', 'warning')
+        else:
+            colorize_msg('Successfully deleted!', 'success')
+
+    def do_deleteFeatureComparison(self, arg):
+        """\ndeleteFeatureComparison {"feature": "<feature_name>"}\n"""
+
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"FEATURE": arg}
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        # lookup feature and error if it doesn't exist
+        ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+        if not ftypeRecord:
+            colorize_msg('Feature not found!', 'error')
+            return
+
+        deleteCnt = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_FTYPE']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_CODE'] == parmData['FEATURE']:
+
+                # delete any comparison calls and boms  (must loop through backwards when deleting)
+                for i1 in range(len(self.cfgData['G2_CONFIG']['CFG_CFCALL']) - 1, -1, -1):
+                    if self.cfgData['G2_CONFIG']['CFG_CFCALL'][i1]['FTYPE_ID'] == \
+                            self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']:
+                        for i2 in range(len(self.cfgData['G2_CONFIG']['CFG_CFBOM']) - 1, -1, -1):
+                            if self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]['CFCALL_ID'] == \
+                                    self.cfgData['G2_CONFIG']['CFG_CFCALL'][i1]['CFCALL_ID']:
+                                del self.cfgData['G2_CONFIG']['CFG_CFBOM'][i2]
+                                deleteCnt += 1
+                        del self.cfgData['G2_CONFIG']['CFG_CFCALL'][i1]
+                        deleteCnt += 1
+                        self.configUpdated = True
+
+        if deleteCnt == 0:
+            colorize_msg('Record not found!', 'warning')
+        else:
+            colorize_msg('Successfully deleted!', 'success')
+
+    def do_deleteFeatureDistinctCall(self, arg):
+        """\ndeleteFeatureDistinctCall {"feature": "<feature_name>"}\n"""
+
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"FEATURE": arg}
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        # lookup feature and error if it doesn't exist
+        ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+        if not ftypeRecord:
+            colorize_msg('Feature not found!', 'error')
+            return
+
+        deleteCnt = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_FTYPE']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_CODE'] == parmData['FEATURE']:
+
+                # delete any distinct-func calls and boms  (must loop through backwards when deleting)
+                for i1 in range(len(self.cfgData['G2_CONFIG']['CFG_DFCALL']) - 1, -1, -1):
+                    if self.cfgData['G2_CONFIG']['CFG_DFCALL'][i1]['FTYPE_ID'] == \
+                            self.cfgData['G2_CONFIG']['CFG_FTYPE'][i]['FTYPE_ID']:
+                        for i2 in range(len(self.cfgData['G2_CONFIG']['CFG_DFBOM']) - 1, -1, -1):
+                            if self.cfgData['G2_CONFIG']['CFG_DFBOM'][i2]['DFCALL_ID'] == \
+                                    self.cfgData['G2_CONFIG']['CFG_DFCALL'][i1]['DFCALL_ID']:
+                                del self.cfgData['G2_CONFIG']['CFG_DFBOM'][i2]
+                                deleteCnt += 1
+                        del self.cfgData['G2_CONFIG']['CFG_DFCALL'][i1]
+                        deleteCnt += 1
+                        self.configUpdated = True
+
+        if deleteCnt == 0:
+            colorize_msg('Record not found!', 'warning')
+        else:
+            colorize_msg('Successfully deleted!', 'success')
+
+# ===== function and calls section =====
 
     def do_addStandardizeCall(self, arg):
         """
@@ -2790,139 +3442,88 @@ class G2CmdShell(cmd.Cmd, object):
         \n\n\taddStandardizeCall {"element":"COUNTRY", "function":"STANDARDIZE_COUNTRY", "execOrder":100}\n
         """
 
-        if not argCheck('addStandardizeCall', arg, self.do_addStandardizeCall.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
             parmData = dictKeysUpper(json.loads(arg))
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            featureIsSpecified = False
-            ftypeID = -1
-            if 'FEATURE' in parmData and len(parmData['FEATURE']) != 0:
-                parmData['FEATURE'] = parmData['FEATURE'].upper()
-                ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-                if not ftypeRecord:
-                    colorize_msg('Invalid feature: %s.' % parmData['FEATURE'], 'B')
-                    return
-                featureIsSpecified = True
-                ftypeID = ftypeRecord['FTYPE_ID']
-
-            elementIsSpecified = False
-            felemID = -1
-            if 'ELEMENT' in parmData and len(parmData['ELEMENT']) != 0:
-                parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-                felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
-                if not felemRecord:
-                    colorize_msg('Invalid element: %s.' % parmData['ELEMENT'], 'B')
-                    return
-                elementIsSpecified = True
-                felemID = felemRecord['FELEM_ID']
-
-            if featureIsSpecified is False and elementIsSpecified is False:
-                colorize_msg('No feature or element specified.', 'B')
-                return
-
-            if featureIsSpecified is True and elementIsSpecified is True:
-                colorize_msg('Both feature and element specified.  Must only use one, not both.', 'B')
-                return
-
-            sfuncID = -1
-            if 'FUNCTION' not in parmData or len(parmData['FUNCTION'].strip()) == 0:
-                colorize_msg('Function not specified.', 'B')
-                return
-            parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-            sfuncRecord = self.getRecord('CFG_SFUNC', 'SFUNC_CODE', parmData['FUNCTION'])
-            if not sfuncRecord:
-                colorize_msg('Invalid function: %s.' % parmData['FUNCTION'], 'B')
-                return
-            sfuncID = sfuncRecord['SFUNC_ID']
-
-            if 'EXECORDER' not in parmData:
-                colorize_msg('Exec order not specified.', 'B')
-                return
-
-            maxID = []
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_SFCALL'])):
-                maxID.append(self.cfgData['G2_CONFIG']['CFG_SFCALL'][i]['SFCALL_ID'])
-
-            sfcallID = 0
-            if 'ID' in parmData:
-                sfcallID = int(parmData['ID'])
-            else:
-                sfcallID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
-
-            newRecord = {}
-            newRecord['SFCALL_ID'] = sfcallID
-            newRecord['FTYPE_ID'] = ftypeID
-            newRecord['FELEM_ID'] = felemID
-            newRecord['SFUNC_ID'] = sfuncID
-            newRecord['EXEC_ORDER'] = parmData['EXECORDER']
-            self.cfgData['G2_CONFIG']['CFG_SFCALL'].append(newRecord)
-            self.configUpdated = True
-            colorize_msg('Successfully added!', 'B')
-            if self.doDebug:
-                debug(newRecord)
-
-    def do_addExpressionFunc(self, arg):
-        """
-        \n\taddExpressionFunc {"function":"<function_name>", "connectStr":"<plugin_base_name>"}
-        \n\n\taddExpressionFunc {"function":"FEAT_BUILDER", "connectStr":"g2FeatBuilder"}\n
-        """
-
-        if not argCheck('addExpressionFunc', arg, self.do_addExpressionFunc.__doc__):
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
             return
 
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            if self.getRecord('CFG_EFUNC', 'EFUNC_CODE', parmData['FUNCTION']):
-                colorize_msg('Function %s already exists!' % parmData['FUNCTION'], 'B')
+        featureIsSpecified = False
+        ftypeID = -1
+        if 'FEATURE' in parmData and len(parmData['FEATURE']) != 0:
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
+            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+            if not ftypeRecord:
+                colorize_msg('Feature does not exist!', 'error')
                 return
-            else:
+            featureIsSpecified = True
+            ftypeID = ftypeRecord['FTYPE_ID']
 
-                # default for missing values
-                if 'FUNCLIB' not in parmData or len(parmData['FUNCLIB'].strip()) == 0:
-                    parmData['FUNCLIB'] = 'g2func_lib'
-                if 'VERSION' not in parmData or len(parmData['VERSION'].strip()) == 0:
-                    parmData['VERSION'] = '1'
-                if 'CONNECTSTR' not in parmData or len(parmData['CONNECTSTR'].strip()) == 0:
-                    colorize_msg('ConnectStr value not specified.', 'B')
-                    return
+        elementIsSpecified = False
+        felemID = -1
+        if 'ELEMENT' in parmData and len(parmData['ELEMENT']) != 0:
+            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
+            felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
+            if not felemRecord:
+                colorize_msg('Element does not exist!', 'error')
+                return
+            elementIsSpecified = True
+            felemID = felemRecord['FELEM_ID']
 
-                maxID = []
-                for i in range(len(self.cfgData['G2_CONFIG']['CFG_EFUNC'])):
-                    maxID.append(self.cfgData['G2_CONFIG']['CFG_EFUNC'][i]['EFUNC_ID'])
+        if featureIsSpecified is False and elementIsSpecified is False:
+            colorize_msg('No feature or element specified.', 'error')
+            return
 
-                efuncID = 0
-                if 'ID' in parmData:
-                    efuncID = int(parmData['ID'])
-                else:
-                    efuncID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
+        if featureIsSpecified is True and elementIsSpecified is True:
+            colorize_msg('Both feature and element specified.  Must only use one, not both.', 'error')
+            return
 
-                newRecord = {}
-                newRecord['EFUNC_ID'] = efuncID
-                newRecord['EFUNC_CODE'] = parmData['FUNCTION']
-                newRecord['EFUNC_DESC'] = parmData['FUNCTION']
-                newRecord['FUNC_LIB'] = parmData['FUNCLIB']
-                newRecord['FUNC_VER'] = parmData['VERSION']
-                newRecord['CONNECT_STR'] = parmData['CONNECTSTR']
-                self.cfgData['G2_CONFIG']['CFG_EFUNC'].append(newRecord)
-                self.configUpdated = True
-                colorize_msg('Successfully added!', 'B')
-                if self.doDebug:
-                    debug(newRecord)
+        sfuncID = -1
+        if 'FUNCTION' not in parmData or len(parmData['FUNCTION'].strip()) == 0:
+            colorize_msg('Function is required', 'error')
+            return
+        parmData['FUNCTION'] = parmData['FUNCTION'].upper()
+        sfuncRecord = self.getRecord('CFG_SFUNC', 'SFUNC_CODE', parmData['FUNCTION'])
+        if not sfuncRecord:
+            colorize_msg('Function does not exist', 'error')
+            return
+        sfuncID = sfuncRecord['SFUNC_ID']
+
+        if 'EXECORDER' not in parmData:
+            colorize_msg('Exec order not specified.', 'error')
+            return
+
+        maxID = []
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_SFCALL'])):
+            maxID.append(self.cfgData['G2_CONFIG']['CFG_SFCALL'][i]['SFCALL_ID'])
+
+        sfcallID = 0
+        if 'ID' in parmData:
+            sfcallID = int(parmData['ID'])
+        else:
+            sfcallID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
+
+        newRecord = {}
+        newRecord['SFCALL_ID'] = sfcallID
+        newRecord['FTYPE_ID'] = ftypeID
+        newRecord['FELEM_ID'] = felemID
+        newRecord['SFUNC_ID'] = sfuncID
+        newRecord['EXEC_ORDER'] = parmData['EXECORDER']
+        self.cfgData['G2_CONFIG']['CFG_SFCALL'].append(newRecord)
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+        if self.doDebug:
+            debug(newRecord)
 
     def do_updateFeatureVersion(self, arg):
         """\nupdateFeatureVersion {"feature":"<feature_name>", "version":<version_number>}\n"""
 
-        if not argCheck('updateFeatureVersion', arg, self.do_updateFeatureVersion.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -2932,25 +3533,26 @@ class G2CmdShell(cmd.Cmd, object):
             if 'VERSION' not in parmData:
                 raise ValueError('Version is required!')
             parmData['FEATURE'] = parmData['FEATURE'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
 
-            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-            if not ftypeRecord:
-                colorize_msg('Feature %s does not exist!' % parmData['FEATURE'], 'B')
-                return
-            else:
-                ftypeRecord['VERSION'] = parmData['VERSION']
-                self.configUpdated = True
-                colorize_msg('Successfully updated!', 'B')
-                if self.doDebug:
-                    debug(ftypeRecord)
+        ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+        if not ftypeRecord:
+            colorize_msg('Feature does not exist!' 'error')
+            return
+        else:
+            ftypeRecord['VERSION'] = parmData['VERSION']
+            self.configUpdated = True
+            colorize_msg('Successfully updated!', 'B')
+            if self.doDebug:
+                debug(ftypeRecord)
 
     def do_updateAttributeAdvanced(self, arg):
         """\nupdateAttributeAdvanced {"attribute":"<attribute_name>", "advanced":"Yes"}\n"""
 
-        if not argCheck('updateAttributeAdvanced', arg, self.do_updateAttributeAdvanced.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -2959,25 +3561,26 @@ class G2CmdShell(cmd.Cmd, object):
                 raise ValueError('Attribute name is required!')
             if 'ADVANCED' not in parmData:
                 raise ValueError('Advanced value is required!')
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
 
-            attrRecord = self.getRecord('CFG_ATTR', 'ATTR_CODE', parmData['ATTRIBUTE'])
-            if not attrRecord:
-                colorize_msg('Attribute %s does not exist!' % parmData['ATTRIBUTE'], 'B')
-                return
-            else:
-                attrRecord['ADVANCED'] = parmData['ADVANCED']
-                self.configUpdated = True
-                colorize_msg('Successfully updated!', 'B')
-                if self.doDebug:
-                    debug(attrRecord)
+        attrRecord = self.getRecord('CFG_ATTR', 'ATTR_CODE', parmData['ATTRIBUTE'])
+        if not attrRecord:
+            colorize_msg('Attribute does not exist!', 'error')
+            return
+        else:
+            attrRecord['ADVANCED'] = parmData['ADVANCED']
+            self.configUpdated = True
+            colorize_msg('Successfully updated!', 'success')
+            if self.doDebug:
+                debug(attrRecord)
 
     def do_updateExpressionFuncVersion(self, arg):
         """\nupdateExpressionFuncVersion {"function":"<function_name>", "version":"<version_number>"}\n"""
 
-        if not argCheck('updateExpressionFuncVersion', arg, self.do_updateExpressionFuncVersion.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -2987,198 +3590,21 @@ class G2CmdShell(cmd.Cmd, object):
             if 'VERSION' not in parmData or len(parmData['VERSION']) == 0:
                 raise ValueError('Version is required!')
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            funcRecord = self.getRecord('CFG_EFUNC', 'EFUNC_CODE', parmData['FUNCTION'])
-            if not funcRecord:
-                colorize_msg('Function %s does not exist!' % parmData['FUNCTION'], 'B')
-                return
-            else:
-                funcRecord['FUNC_VER'] = parmData['VERSION']
-                self.configUpdated = True
-                colorize_msg('Successfully updated!', 'B')
-
-                if self.doDebug:
-                    debug(funcRecord)
-
-    def do_addComparisonFuncReturnCode(self, arg):
-        """
-        EXAMPLES:
-           addComparisonFuncReturnCode {"function":"<function_name>", "scoreName":"<score_name>", sameScore": <n>, "closeScore": <n>, "likelyScore": <n>, "plausibleScore": <n>, "unlikelyScore": <n>"}
-           addComparisonFuncReturnCode {"function":"EMAIL_COMP", "scoreName":"FULL_SCORE", "sameScore": 100, "closeScore": 90, "likelyScore": 80, "plausibleScore": 70, "unlikelyScore": 60}
-
-        EXAMPLES (with feature):
-           addComparisonFuncReturnCode {"function":"<function_name>", "feature":"<feature>", "scoreName":"<score_name>", sameScore": <n>, "closeScore": <n>, "likelyScore": <n>, "plausibleScore": <n>, "unlikelyScore": <n>"}
-           addComparisonFuncReturnCode {"function":"ID_COMP", "feature":"NATIONAL_ID", "scoreName":"FULL_SCORE", "sameScore": 100, "closeScore": 95, "likelyScore": 95, "plausibleScore": 95, "unlikelyScore": 95}
-        """
-        if not argCheck('addComparisonFuncReturnCode', arg, self.do_addComparisonFuncReturnCode.__doc__):
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
             return
 
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-            parmData['SCORENAME'] = parmData['SCORENAME'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
+        funcRecord = self.getRecord('CFG_EFUNC', 'EFUNC_CODE', parmData['FUNCTION'])
+        if not funcRecord:
+            colorize_msg('Function does not exist!', 'error')
+            return
         else:
-
-            cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_CODE', parmData['FUNCTION'])
-            if not cfuncRecord:
-                colorize_msg('Function %s does not exist!' % parmData['FUNCTION'], 'B')
-                return
-            cfuncID = cfuncRecord['CFUNC_ID']
-
-            if 'FEATURE' in parmData:
-                ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-                if not ftypeRecord:
-                    colorize_msg('Feature %s does not exist!' % parmData['FEATURE'], 'B')
-                    return
-                ftypeID = ftypeRecord['FTYPE_ID']
-            else:
-                ftypeID = 0
-
-            #  check for duplicated return codes
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFRTN']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFUNC_ID'] == cfuncID and \
-                        self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['FTYPE_ID'] == ftypeID and \
-                        self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFUNC_RTNVAL'] == parmData['SCORENAME']:
-                    colorize_msg('Comparison function return value for feature already exists!', 'B')
-                    return
-
-            maxID = []
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFRTN'])):
-                maxID.append(self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFRTN_ID'])
-
-            cfrtnID = 0
-            if 'ID' in parmData:
-                cfrtnID = int(parmData['ID'])
-            else:
-                cfrtnID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
-
-            execOrder = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFRTN'])):
-                if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFUNC_ID'] == cfuncID and self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['FTYPE_ID'] == ftypeID:
-                    if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['EXEC_ORDER'] > execOrder:
-                        execOrder = self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['EXEC_ORDER']
-            execOrder = execOrder + 1
-
-            sameScore = 100
-            closeScore = 90
-            likelyScore = 80
-            plausibleScore = 70
-            unlikelyScore = 60
-
-            if 'SAMESCORE' in parmData:
-                sameScore = int(parmData['SAMESCORE'])
-            if 'CLOSESCORE' in parmData:
-                closeScore = int(parmData['CLOSESCORE'])
-            if 'LIKELYSCORE' in parmData:
-                likelyScore = int(parmData['LIKELYSCORE'])
-            if 'PLAUSIBLESCORE' in parmData:
-                plausibleScore = int(parmData['PLAUSIBLESCORE'])
-            if 'UNLIKELYSCORE' in parmData:
-                unlikelyScore = int(parmData['UNLIKELYSCORE'])
-
-            newRecord = {}
-            newRecord['CFRTN_ID'] = cfrtnID
-            newRecord['CFUNC_ID'] = cfuncID
-            newRecord['FTYPE_ID'] = ftypeID
-            newRecord['CFUNC_RTNVAL'] = parmData['SCORENAME']
-            newRecord['EXEC_ORDER'] = execOrder
-            newRecord['SAME_SCORE'] = sameScore
-            newRecord['CLOSE_SCORE'] = closeScore
-            newRecord['LIKELY_SCORE'] = likelyScore
-            newRecord['PLAUSIBLE_SCORE'] = plausibleScore
-            newRecord['UN_LIKELY_SCORE'] = unlikelyScore
-            self.cfgData['G2_CONFIG']['CFG_CFRTN'].append(newRecord)
+            funcRecord['FUNC_VER'] = parmData['VERSION']
             self.configUpdated = True
-            colorize_msg('Successfully added!', 'B')
+            colorize_msg('Successfully updated!', 'success')
+
             if self.doDebug:
-                debug(newRecord)
-
-    def do_deleteComparisonFuncReturnCode(self, arg):
-        """
-        EXAMPLE
-           deleteComparisonFuncReturnCode {"id": "<id>"}
-        """
-        if not argCheck('do_deleteComparisonFuncReturnCode', arg, self.do_deleteComparisonFuncReturnCode.__doc__):
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
-            parmData['ID'] = int(parmData['ID'])
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-            deleteCnt = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFRTN']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFRTN_ID'] == parmData['ID']:
-                    del self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]
-                    deleteCnt += 1
-                    self.configUpdated = True
-            if deleteCnt == 0:
-                print('\nRecord not found!\n')
-            else:
-                colorize_msg('%s rows deleted!' % deleteCnt, 'B')
-
-    def do_addComparisonFunc(self, arg):
-        """
-        \n\taddComparisonFunc {"function":"<function_name>", "connectStr":"<plugin_base_name>"}
-        \n\n\taddComparisonFunc {"function":"EMAIL_COMP", "connectStr":"g2EmailComp"}\n
-        """
-
-        if not argCheck('addComparisonFunc', arg, self.do_addComparisonFunc.__doc__):
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            if self.getRecord('CFG_CFUNC', 'CFUNC_CODE', parmData['FUNCTION']):
-                colorize_msg('Function %s already exists!' % parmData['FUNCTION'], 'B')
-                return
-            else:
-
-                # default for missing values
-
-                if 'FUNCLIB' not in parmData or len(parmData['FUNCLIB'].strip()) == 0:
-                    parmData['FUNCLIB'] = 'INT_LIB'
-                if 'VERSION' not in parmData or len(parmData['VERSION'].strip()) == 0:
-                    parmData['VERSION'] = '1'
-                if 'CONNECTSTR' not in parmData or len(parmData['CONNECTSTR'].strip()) == 0:
-                    colorize_msg('ConnectStr value not specified.', 'B')
-                    return
-
-                maxID = []
-                for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFUNC'])):
-                    maxID.append(self.cfgData['G2_CONFIG']['CFG_CFUNC'][i]['CFUNC_ID'])
-
-                cfuncID = 0
-                if 'ID' in parmData:
-                    cfuncID = int(parmData['ID'])
-                else:
-                    cfuncID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
-
-                newRecord = {}
-                newRecord['CFUNC_ID'] = cfuncID
-                newRecord['CFUNC_CODE'] = parmData['FUNCTION']
-                newRecord['CFUNC_DESC'] = parmData['FUNCTION']
-                newRecord['FUNC_LIB'] = parmData['FUNCLIB']
-                newRecord['FUNC_VER'] = parmData['VERSION']
-                newRecord['CONNECT_STR'] = parmData['CONNECTSTR']
-                newRecord['ANON_SUPPORT'] = 'Yes'
-                newRecord['LANGUAGE'] = parmData['LANGUAGE']
-                newRecord['JAVA_CLASS_NAME'] = parmData['JAVACLASSNAME']
-                self.cfgData['G2_CONFIG']['CFG_CFUNC'].append(newRecord)
-                self.configUpdated = True
-                colorize_msg('Successfully added!', 'B')
-                if self.doDebug:
-                    debug(newRecord)
+                debug(funcRecord)
 
     def do_addExpressionCall(self, arg):
         """
@@ -3187,7 +3613,8 @@ class G2CmdShell(cmd.Cmd, object):
         \n\n\taddExpressionCall {"element":"COUNTRY_CODE", "function":"FEAT_BUILDER", "execOrder":100, "expressionFeature":"COUNTRY_OF_ASSOCIATION", "virtual":"No","elementList": [{"element":"COUNTRY", "feature":"ADDRESS", "required":"No"}]}\n
         """
 
-        if not argCheck('addExpressionCall', arg, self.do_addExpressionCall.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -3197,192 +3624,191 @@ class G2CmdShell(cmd.Cmd, object):
             if type(parmData['ELEMENTLIST']) is not list:
                 raise ValueError(
                     'Element list should be specified as: "elementlist": ["<values>"]\n\n\tNote the [ and ]')
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        featureIsSpecified = False
+        ftypeID = -1
+        if 'FEATURE' in parmData and len(parmData['FEATURE']) != 0:
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
+            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+            if not ftypeRecord:
+                colorize_msg('Feature does not exist', 'error')
+                return
+            featureIsSpecified = True
+            ftypeID = ftypeRecord['FTYPE_ID']
+
+        elementIsSpecified = False
+        felemID = -1
+        if 'ELEMENT' in parmData and len(parmData['ELEMENT']) != 0:
+            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
+            felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
+            if not felemRecord:
+                colorize_msg('Element does not exist', 'error')
+                return
+            elementIsSpecified = True
+            felemID = felemRecord['FELEM_ID']
+
+        if featureIsSpecified is False and elementIsSpecified is False:
+            colorize_msg('No feature or element specified.', 'error')
+            return
+
+        if featureIsSpecified is True and elementIsSpecified is True:
+            colorize_msg('Both feature and element specified.  Must only use one, not both.', 'error')
+            return
+
+        efuncID = -1
+        if 'FUNCTION' not in parmData or len(parmData['FUNCTION'].strip()) == 0:
+            colorize_msg('Function is required', 'error')
+            return
+        parmData['FUNCTION'] = parmData['FUNCTION'].upper()
+        efuncRecord = self.getRecord('CFG_EFUNC', 'EFUNC_CODE', parmData['FUNCTION'])
+        if not efuncRecord:
+            colorize_msg('Function does not exist', 'error')
+            return
+        efuncID = efuncRecord['EFUNC_ID']
+
+        if 'EXECORDER' not in parmData:
+            colorize_msg('An execOrder for the call must be specified.', 'error')
+            return
+
+        callExists = False
+        efcallID = int(parmData['ID']) if 'ID' in parmData else 0
+        maxID = []
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_EFCALL'])):
+            maxID.append(self.cfgData['G2_CONFIG']['CFG_EFCALL'][i]['EFCALL_ID'])
+            if self.cfgData['G2_CONFIG']['CFG_EFCALL'][i]['EFCALL_ID'] == efcallID:
+                colorize_msg('The supplied ID already exists.', 'error')
+                callExists = True
+                break
+            elif self.cfgData['G2_CONFIG']['CFG_EFCALL'][i]['FTYPE_ID'] == ftypeID and \
+                    self.cfgData['G2_CONFIG']['CFG_EFCALL'][i]['EXEC_ORDER'] == parmData['EXECORDER']:
+                colorize_msg('A call for that feature and execOrder already exists.', 'warning')
+                callExists = True
+                break
+        if callExists:
+            return
+
+        if 'ID' in parmData:
+            efcallID = int(parmData['ID'])
         else:
+            efcallID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
 
-            featureIsSpecified = False
-            ftypeID = -1
-            if 'FEATURE' in parmData and len(parmData['FEATURE']) != 0:
-                parmData['FEATURE'] = parmData['FEATURE'].upper()
-                ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-                if not ftypeRecord:
-                    colorize_msg('Invalid feature: %s.' % parmData['FEATURE'], 'B')
+        isVirtual = parmData['VIRTUAL'] if 'VIRTUAL' in parmData else 'No'
+
+        efeatFTypeID = -1
+        if 'EXPRESSIONFEATURE' in parmData and len(parmData['EXPRESSIONFEATURE']) != 0:
+            parmData['EXPRESSIONFEATURE'] = parmData['EXPRESSIONFEATURE'].upper()
+            expressionFTypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['EXPRESSIONFEATURE'])
+            if not expressionFTypeRecord:
+                colorize_msg('Expression feature does not exist', 'error')
+                return
+            efeatFTypeID = expressionFTypeRecord['FTYPE_ID']
+
+        # ensure we have valid elements
+        elementCount = 0
+        for element in parmData['ELEMENTLIST']:
+            elementCount += 1
+            elementRecord = dictKeysUpper(element)
+
+            bomFTypeIsSpecified = False
+            bomFTypeID = -1
+            if 'FEATURE' in elementRecord and len(elementRecord['FEATURE']) != 0:
+                elementRecord['FEATURE'] = elementRecord['FEATURE'].upper()
+                bomFTypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', elementRecord['FEATURE'])
+                if not bomFTypeRecord:
+                    colorize_msg('Referenced feature does not exist', 'error')
                     return
-                featureIsSpecified = True
-                ftypeID = ftypeRecord['FTYPE_ID']
+                bomFTypeIsSpecified = True
+                bomFTypeID = bomFTypeRecord['FTYPE_ID']
 
-            elementIsSpecified = False
-            felemID = -1
-            if 'ELEMENT' in parmData and len(parmData['ELEMENT']) != 0:
-                parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-                felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
-                if not felemRecord:
-                    colorize_msg('Invalid element: %s.' % parmData['ELEMENT'], 'B')
+            bomFElemIsSpecified = False
+            bomFElemID = -1
+            if 'ELEMENT' in elementRecord and len(elementRecord['ELEMENT']) != 0:
+                elementRecord['ELEMENT'] = elementRecord['ELEMENT'].upper()
+                bomFElemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', elementRecord['ELEMENT'])
+                if not bomFElemRecord:
+                    colorize_msg('Referenced element does not exist!', 'error')
                     return
-                elementIsSpecified = True
-                felemID = felemRecord['FELEM_ID']
+                bomFElemIsSpecified = True
+                bomFElemID = bomFElemRecord['FELEM_ID']
 
-            if featureIsSpecified is False and elementIsSpecified is False:
-                colorize_msg('No feature or element specified.', 'B')
+            if bomFElemIsSpecified is False:
+                colorize_msg('Referenced element is missing!', 'error')
                 return
 
-            if featureIsSpecified is True and elementIsSpecified is True:
-                colorize_msg('Both feature and element specified.  Must only use one, not both.', 'B')
-                return
-
-            efuncID = -1
-            if 'FUNCTION' not in parmData or len(parmData['FUNCTION'].strip()) == 0:
-                colorize_msg('Function not specified.', 'B')
-                return
-            parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-            efuncRecord = self.getRecord('CFG_EFUNC', 'EFUNC_CODE', parmData['FUNCTION'])
-            if not efuncRecord:
-                colorize_msg('Invalid function: %s.' % parmData['FUNCTION'], 'B')
-                return
-            efuncID = efuncRecord['EFUNC_ID']
-
-            if 'EXECORDER' not in parmData:
-                colorize_msg('An execOrder for the call must be specified.', 'B')
-                return
-
-            callExists = False
-            efcallID = int(parmData['ID']) if 'ID' in parmData else 0
-            maxID = []
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_EFCALL'])):
-                maxID.append(self.cfgData['G2_CONFIG']['CFG_EFCALL'][i]['EFCALL_ID'])
-                if self.cfgData['G2_CONFIG']['CFG_EFCALL'][i]['EFCALL_ID'] == efcallID:
-                    colorize_msg('The supplied ID already exists.', 'B')
-                    callExists = True
-                    break
-                elif self.cfgData['G2_CONFIG']['CFG_EFCALL'][i]['FTYPE_ID'] == ftypeID and \
-                        self.cfgData['G2_CONFIG']['CFG_EFCALL'][i]['EXEC_ORDER'] == parmData['EXECORDER']:
-                    colorize_msg('A call for that feature and execOrder already exists.', 'B')
-                    callExists = True
-                    break
-            if callExists:
-                return
-
-            if 'ID' in parmData:
-                efcallID = int(parmData['ID'])
-            else:
-                efcallID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
-
-            isVirtual = parmData['VIRTUAL'] if 'VIRTUAL' in parmData else 'No'
-
-            efeatFTypeID = -1
-            if 'EXPRESSIONFEATURE' in parmData and len(parmData['EXPRESSIONFEATURE']) != 0:
-                parmData['EXPRESSIONFEATURE'] = parmData['EXPRESSIONFEATURE'].upper()
-                expressionFTypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['EXPRESSIONFEATURE'])
-                if not expressionFTypeRecord:
-                    colorize_msg('Invalid expression feature: %s.' % parmData['EXPRESSIONFEATURE'], 'B')
+            bomFTypeFeatureLinkIsSpecified = False
+            if 'FEATURELINK' in elementRecord and len(elementRecord['FEATURELINK']) != 0:
+                elementRecord['FEATURELINK'] = elementRecord['FEATURELINK'].upper()
+                if elementRecord['FEATURELINK'] != 'PARENT':
+                    colorize_msg('featureLink must be "PARENT" if feature not specifiied', 'error')
                     return
-                efeatFTypeID = expressionFTypeRecord['FTYPE_ID']
+                bomFTypeFeatureLinkIsSpecified = True
+                bomFTypeID = 0
 
-            # ensure we have valid elements
-            elementCount = 0
-            for element in parmData['ELEMENTLIST']:
-                elementCount += 1
-                elementRecord = dictKeysUpper(element)
-
-                bomFTypeIsSpecified = False
-                bomFTypeID = -1
-                if 'FEATURE' in elementRecord and len(elementRecord['FEATURE']) != 0:
-                    elementRecord['FEATURE'] = elementRecord['FEATURE'].upper()
-                    bomFTypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', elementRecord['FEATURE'])
-                    if not bomFTypeRecord:
-                        colorize_msg('Invalid BOM feature: %s.' % elementRecord['FEATURE'], 'B')
-                        return
-                    bomFTypeIsSpecified = True
-                    bomFTypeID = bomFTypeRecord['FTYPE_ID']
-
-                bomFElemIsSpecified = False
-                bomFElemID = -1
-                if 'ELEMENT' in elementRecord and len(elementRecord['ELEMENT']) != 0:
-                    elementRecord['ELEMENT'] = elementRecord['ELEMENT'].upper()
-                    bomFElemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', elementRecord['ELEMENT'])
-                    if not bomFElemRecord:
-                        colorize_msg('Invalid BOM element: %s.' % elementRecord['ELEMENT'], 'B')
-                        return
-                    bomFElemIsSpecified = True
-                    bomFElemID = bomFElemRecord['FELEM_ID']
-
-                if bomFElemIsSpecified is False:
-                    colorize_msg('No BOM element specified on BOM entry.', 'B')
-                    return
-
-                bomFTypeFeatureLinkIsSpecified = False
-                if 'FEATURELINK' in elementRecord and len(elementRecord['FEATURELINK']) != 0:
-                    elementRecord['FEATURELINK'] = elementRecord['FEATURELINK'].upper()
-                    if elementRecord['FEATURELINK'] != 'PARENT':
-                        colorize_msg(
-                            'Invalid feature link value: %s.  (Must use \'parent\')' % elementRecord['FEATURELINK'],
-                            'B')
-                        return
-                    bomFTypeFeatureLinkIsSpecified = True
-                    bomFTypeID = 0
-
-                if bomFTypeIsSpecified is True and bomFTypeFeatureLinkIsSpecified is True:
-                    colorize_msg('Cannot specify both ftype and feature-link on single function BOM entry.', 'B')
-                    return
-
-            if elementCount == 0:
-                colorize_msg('No elements specified.', 'B')
+            if bomFTypeIsSpecified is True and bomFTypeFeatureLinkIsSpecified is True:
+                colorize_msg('Cannot specify both feature and featureLink on single function BOM entry.', 'error')
                 return
 
-            # add the expression call
+        if elementCount == 0:
+            colorize_msg('No elements specified.', 'error')
+            return
+
+        # add the expression call
+        newRecord = {}
+        newRecord['EFCALL_ID'] = efcallID
+        newRecord['FTYPE_ID'] = ftypeID
+        newRecord['FELEM_ID'] = felemID
+        newRecord['EFUNC_ID'] = efuncID
+        newRecord['EXEC_ORDER'] = parmData['EXECORDER']
+        newRecord['EFEAT_FTYPE_ID'] = efeatFTypeID
+        newRecord['IS_VIRTUAL'] = isVirtual
+        self.cfgData['G2_CONFIG']['CFG_EFCALL'].append(newRecord)
+        if self.doDebug:
+            debug(newRecord)
+
+        # add elements
+        efbomOrder = 0
+        for element in parmData['ELEMENTLIST']:
+            efbomOrder += 1
+            elementRecord = dictKeysUpper(element)
+
+            bomFTypeID = -1
+            if 'FEATURE' in elementRecord and len(elementRecord['FEATURE']) != 0:
+                bomFTypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', elementRecord['FEATURE'])
+                bomFTypeID = bomFTypeRecord['FTYPE_ID']
+
+            bomFElemID = -1
+            if 'ELEMENT' in elementRecord and len(elementRecord['ELEMENT']) != 0:
+                bomFElemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', elementRecord['ELEMENT'])
+                bomFElemID = bomFElemRecord['FELEM_ID']
+
+            if 'FEATURELINK' in elementRecord and len(elementRecord['FEATURELINK']) != 0:
+                elementRecord['FEATURELINK'] = elementRecord['FEATURELINK'].upper()
+                bomFTypeID = 0
+
+            felemRequired = elementRecord['REQUIRED'] if 'REQUIRED' in elementRecord else 'No'
+
+            # add to expression bom if any
             newRecord = {}
             newRecord['EFCALL_ID'] = efcallID
-            newRecord['FTYPE_ID'] = ftypeID
-            newRecord['FELEM_ID'] = felemID
-            newRecord['EFUNC_ID'] = efuncID
-            newRecord['EXEC_ORDER'] = parmData['EXECORDER']
-            newRecord['EFEAT_FTYPE_ID'] = efeatFTypeID
-            newRecord['IS_VIRTUAL'] = isVirtual
-            self.cfgData['G2_CONFIG']['CFG_EFCALL'].append(newRecord)
+            newRecord['EXEC_ORDER'] = efbomOrder
+            newRecord['FTYPE_ID'] = bomFTypeID
+            newRecord['FELEM_ID'] = bomFElemID
+            newRecord['FELEM_REQ'] = felemRequired
+            self.cfgData['G2_CONFIG']['CFG_EFBOM'].append(newRecord)
             if self.doDebug:
-                debug(newRecord)
+                debug(newRecord, 'EFBOM build')
 
-            # add elements
-            efbomOrder = 0
-            for element in parmData['ELEMENTLIST']:
-                efbomOrder += 1
-                elementRecord = dictKeysUpper(element)
-
-                bomFTypeID = -1
-                if 'FEATURE' in elementRecord and len(elementRecord['FEATURE']) != 0:
-                    bomFTypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', elementRecord['FEATURE'])
-                    bomFTypeID = bomFTypeRecord['FTYPE_ID']
-
-                bomFElemID = -1
-                if 'ELEMENT' in elementRecord and len(elementRecord['ELEMENT']) != 0:
-                    bomFElemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', elementRecord['ELEMENT'])
-                    bomFElemID = bomFElemRecord['FELEM_ID']
-
-                if 'FEATURELINK' in elementRecord and len(elementRecord['FEATURELINK']) != 0:
-                    elementRecord['FEATURELINK'] = elementRecord['FEATURELINK'].upper()
-                    bomFTypeID = 0
-
-                felemRequired = elementRecord['REQUIRED'] if 'REQUIRED' in elementRecord else 'No'
-
-                # add to expression bom if any
-                newRecord = {}
-                newRecord['EFCALL_ID'] = efcallID
-                newRecord['EXEC_ORDER'] = efbomOrder
-                newRecord['FTYPE_ID'] = bomFTypeID
-                newRecord['FELEM_ID'] = bomFElemID
-                newRecord['FELEM_REQ'] = felemRequired
-                self.cfgData['G2_CONFIG']['CFG_EFBOM'].append(newRecord)
-                if self.doDebug:
-                    debug(newRecord, 'EFBOM build')
-
-            self.configUpdated = True
-            colorize_msg('Successfully added!', 'B')
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
 
     def do_deleteExpressionCall(self, arg):
         """\ndeleteExpressionCall {"id": "<id>"}\n"""
 
-        if not argCheck('deleteExpressionCall', arg, self.do_deleteExpressionCall.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -3392,88 +3818,25 @@ class G2CmdShell(cmd.Cmd, object):
             else:
                 searchField = 'EFCALL_ID'
                 searchValue = int(parmData['ID'])
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            deleteCnt = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_EFCALL']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_EFCALL'][i][searchField] == searchValue:
-                    del self.cfgData['G2_CONFIG']['CFG_EFCALL'][i]
-                    deleteCnt += 1
-                    self.configUpdated = True
-            if deleteCnt == 0:
-                print('\nRecord not found!\n')
-                return
-            colorize_msg('%s rows deleted!' % deleteCnt, 'B')
-
-            # delete the efboms too
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_EFBOM']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_EFBOM'][i][searchField] == searchValue:
-                    del self.cfgData['G2_CONFIG']['CFG_EFBOM'][i]
-
-    def do_addElement(self, arg):
-        """
-        \n\taddElement {"element": "<element_name>"}
-        \n\n\taddElement {"element": "<element_name>", "tokenize": "no", "datatype": "no"}
-        \n\n\tFor additional example structures, use getFeature or listFeatures\n
-        """
-
-        if not argCheck('addElement', arg, self.do_addElement.__doc__):
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
             return
 
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ELEMENT": arg}
-            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-
-            if self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT']):
-                colorize_msg('Element %s already exists!' % parmData['ELEMENT'], 'B')
-                return
-            else:
-
-                # default for missing values
-                if 'DATATYPE' not in parmData or len(parmData['DATATYPE'].strip()) == 0:
-                    parmData['DATATYPE'] = 'string'
-                else:
-                    if parmData['DATATYPE'].upper() not in ('DATE', 'DATETIME', 'JSON', 'NUMBER', 'STRING'):
-                        colorize_msg(
-                            'Invalid datatype value: %s  (must be "DATE", "DATETIME", "JSON", "NUMBER", or "STRING")' %
-                            parmData['DATATYPE'], 'B')
-                        return
-                    parmData['DATATYPE'] = parmData['DATATYPE'].lower()
-
-                if 'TOKENIZE' not in parmData or len(parmData['TOKENIZE'].strip()) == 0:
-                    parmData['TOKENIZE'] = 'No'
-                else:
-                    if parmData['TOKENIZE'] not in ('0', '1', 'No', 'Yes'):
-                        colorize_msg(
-                            'Invalid tokenize value: %s  (must be "0", "1", "No", or "Yes")' % parmData['TOKENIZE'],
-                            'B')
-                        return
-
-                maxID = []
-                for i in range(len(self.cfgData['G2_CONFIG']['CFG_FELEM'])):
-                    maxID.append(self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID'])
-
-                if 'ID' in parmData:
-                    felemID = int(parmData['ID'])
-                else:
-                    felemID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
-
-                newRecord = {}
-                newRecord['FELEM_ID'] = felemID
-                newRecord['FELEM_CODE'] = parmData['ELEMENT']
-                newRecord['FELEM_DESC'] = parmData['ELEMENT']
-                newRecord['TOKENIZE'] = parmData['TOKENIZE']
-                newRecord['DATA_TYPE'] = parmData['DATATYPE']
-                self.cfgData['G2_CONFIG']['CFG_FELEM'].append(newRecord)
+        deleteCnt = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_EFCALL']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_EFCALL'][i][searchField] == searchValue:
+                del self.cfgData['G2_CONFIG']['CFG_EFCALL'][i]
+                deleteCnt += 1
                 self.configUpdated = True
-                colorize_msg('Successfully added!', 'B')
-                if self.doDebug:
-                    debug(newRecord)
+        if deleteCnt == 0:
+            colorize_msg('Record not found', 'warning')
+        else:
+            colorize_msg('Successfully deleted!', 'success')
+
+        # delete the efboms too
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_EFBOM']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_EFBOM'][i][searchField] == searchValue:
+                del self.cfgData['G2_CONFIG']['CFG_EFBOM'][i]
 
     def do_addElementToFeature(self, arg):
         """
@@ -3482,7 +3845,8 @@ class G2CmdShell(cmd.Cmd, object):
         \n\n\tFor additional example structures, use getFeature or listFeatures\n
         """
 
-        if not argCheck('addElementToFeature', arg, self.do_addElementToFeature.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -3497,15 +3861,14 @@ class G2CmdShell(cmd.Cmd, object):
                 parmData['FEATURE'] = parmData['FEATURE'].upper()
                 ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
                 if not ftypeRecord:
-                    colorize_msg(
-                        'Invalid feature: %s. Use listFeatures to see valid features.' % parmData['FEATURE'], 'B')
+                    colorize_msg('Feature does not exist!', 'error')
                     return
 
                 parmData['ELEMENT'] = parmData['ELEMENT'].upper()
                 felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
 
             else:
-                colorize_msg('Both a feature and element must be specified!', 'B')
+                colorize_msg('Both a feature and element must be specified!', 'error')
                 return
 
             # default for missing values
@@ -3514,25 +3877,21 @@ class G2CmdShell(cmd.Cmd, object):
                 parmData['COMPARED'] = 'No'
             else:
                 if parmData['COMPARED'].upper() not in ('YES', 'NO'):
-                    colorize_msg('Invalid compared value: %s  (must be "Yes", or "No")' % parmData['COMPARED'],
-                                      'B')
+                    colorize_msg('"compared" value must be "Yes" or "No"', 'error')
                     return
 
             if 'EXPRESSED' not in parmData or len(parmData['EXPRESSED'].strip()) == 0:
                 parmData['EXPRESSED'] = 'No'
             else:
                 if parmData['EXPRESSED'].upper() not in ('YES', 'NO'):
-                    colorize_msg('Invalid expressed value: %s  (must be "Yes", or "No")' % parmData['EXPRESSED'],
-                                      'B')
+                    colorize_msg('"expressed" value must be "Yes" or "No"', 'error')
                     return
 
             if 'DATATYPE' not in parmData or len(parmData['DATATYPE'].strip()) == 0:
                 parmData['DATATYPE'] = 'string'
             else:
                 if parmData['DATATYPE'].upper() not in ('DATE', 'DATETIME', 'JSON', 'NUMBER', 'STRING'):
-                    colorize_msg(
-                        'Invalid datatype value: %s  (must be "DATE", "DATETIME", "JSON", "NUMBER", or "STRING")' %
-                        parmData['DATATYPE'], 'B')
+                    colorize_msg('"dataType" must be "DATE", "DATETIME", "JSON", "NUMBER", or "STRING"', 'error')
                     return
                 parmData['DATATYPE'] = parmData['DATATYPE'].lower()
 
@@ -3540,16 +3899,14 @@ class G2CmdShell(cmd.Cmd, object):
                 parmData['TOKENIZE'] = 'No'
             else:
                 if parmData['TOKENIZE'] not in ('0', '1', 'No', 'Yes'):
-                    colorize_msg(
-                        'Invalid tokenize value: %s  (must be "0", "1", "No", or "Yes")' % parmData['TOKENIZE'], 'B')
+                    colorize_msg('"tokenize" value must be "Yes" or "No"', 'error')
                     return
 
             if 'DERIVED' not in parmData:
                 parmData['DERIVED'] = 'No'
             else:
                 if parmData['DERIVED'] not in ('0', '1', 'No', 'Yes'):
-                    colorize_msg(
-                        'Invalid derived value: %s  (must be "0", "1", "No", or "Yes")' % parmData['DERIVED'], 'B')
+                    colorize_msg('"derived" value must be "Yes" or "No"', 'error')
                     return
 
             if 'DISPLAY_DELIM' not in parmData:
@@ -3567,9 +3924,7 @@ class G2CmdShell(cmd.Cmd, object):
                         (parmData['TOKENIZE'] and len(parmData['TOKENIZE'].strip()) > 0 and parmData['TOKENIZE'] !=
                          felemRecord['TOKENIZE'])
                 ):
-                    colorize_msg(
-                        'Element %s already exists with conflicting parameters, check with listElement %s' % (
-                            parmData['ELEMENT'], parmData['ELEMENT']), 'B')
+                    colorize_msg('Element already exists with conflicting parameters', 'error')
                     return
             else:
                 # If no element already add it first
@@ -3578,7 +3933,7 @@ class G2CmdShell(cmd.Cmd, object):
                     for i in range(len(self.cfgData['G2_CONFIG']['CFG_FELEM'])):
                         if 'ID' in parmData and int(self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID']) == int(
                                 parmData['ID']):
-                            colorize_msg('Element id %s already exists!' % parmData['ID'], 'B')
+                            colorize_msg('Element id already exists!', 'error')
                             return
                         if self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID'] > maxID:
                             maxID = self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID']
@@ -3596,7 +3951,7 @@ class G2CmdShell(cmd.Cmd, object):
                     newRecord['TOKENIZE'] = parmData['TOKENIZE']
                     self.cfgData['G2_CONFIG']['CFG_FELEM'].append(newRecord)
                     self.configUpdated = True
-                    colorize_msg('Successfully added the element!', 'B')
+                    colorize_msg('Successfully added the element!', 'success')
                     if self.doDebug:
                         debug(newRecord)
 
@@ -3611,7 +3966,7 @@ class G2CmdShell(cmd.Cmd, object):
                         break
 
             if alreadyExists:
-                colorize_msg('Element already exists for feature!', 'B')
+                colorize_msg('Element already exists for feature!', 'error')
             else:
                 newRecord = {}
                 newRecord['FTYPE_ID'] = ftypeRecord['FTYPE_ID']
@@ -3622,14 +3977,15 @@ class G2CmdShell(cmd.Cmd, object):
                 newRecord['DERIVED'] = parmData['DERIVED']
                 self.cfgData['G2_CONFIG']['CFG_FBOM'].append(newRecord)
                 self.configUpdated = True
-                colorize_msg('Successfully added to feature!', 'B')
+                colorize_msg('Successfully added to feature!', 'success')
                 if self.doDebug:
                     debug(newRecord)
 
-    def do_setFeatureElementDisplayLevel(self, arg):
+    def xx_setFeatureElementDisplayLevel(self, arg):
         """\nsetFeatureElementDisplayLevel {"feature": "<feature_name>", "element": "<element_name>", "display_level": <display_level>}\n"""
-
-        if not argCheck('setFeatureElementDisplayLevel', arg, self.do_setFeatureElementDisplayLevel.__doc__):
+        # DELETE AND RE-ADD INSTEAD
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -3644,24 +4000,23 @@ class G2CmdShell(cmd.Cmd, object):
                 parmData['FEATURE'] = parmData['FEATURE'].upper()
                 ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
                 if not ftypeRecord:
-                    colorize_msg(
-                        'Invalid feature: %s. Use listFeatures to see valid features.' % parmData['FEATURE'], 'B')
+                    colorize_msg('Feature does not exist', 'error')
                     return
 
                 parmData['ELEMENT'] = parmData['ELEMENT'].upper()
                 felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
                 if not felemRecord:
-                    colorize_msg('Invalid feature element: %s.' % parmData['ELEMENT'], 'B')
+                    colorize_msg('Element does not exist', 'error')
                     return
 
             else:
-                colorize_msg('Both a feature and element must be specified!', 'B')
+                colorize_msg('Both a feature and element must be specified!', 'error')
                 return
 
             if 'DISPLAY_LEVEL' in parmData:
                 displayLevel = int(parmData['DISPLAY_LEVEL'])
             else:
-                colorize_msg('Display level must be specified!', 'B')
+                colorize_msg('Display level must be specified!', 'error')
                 return
 
             for i in range(len(self.cfgData['G2_CONFIG']['CFG_FBOM'])):
@@ -3669,14 +4024,16 @@ class G2CmdShell(cmd.Cmd, object):
                     if int(self.cfgData['G2_CONFIG']['CFG_FBOM'][i]['FELEM_ID']) == felemRecord['FELEM_ID']:
                         self.cfgData['G2_CONFIG']['CFG_FBOM'][i]['DISPLAY_LEVEL'] = displayLevel
                         self.configUpdated = True
-                        colorize_msg('Feature element display level updated!', 'B')
+                        colorize_msg('Feature element display level updated!', 'success')
                         if self.doDebug:
                             debug(self.cfgData['G2_CONFIG']['CFG_FBOM'][i])
 
-    def do_setFeatureElementDerived(self, arg):
+    def xx_setFeatureElementDerived(self, arg):
         """\nsetFeatureElementDerived {"feature": "<feature_name>", "element": "<element_name>", "derived": <display_level>}\n"""
+        # DELETE AND RE-ADD INSTEAD
 
-        if not argCheck('setFeatureElementDerived', arg, self.do_setFeatureElementDerived.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -3692,13 +4049,13 @@ class G2CmdShell(cmd.Cmd, object):
                 ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
                 if not ftypeRecord:
                     colorize_msg(
-                        'Invalid feature: %s. Use listFeatures to see valid features.' % parmData['FEATURE'], 'B')
+                        'Feature does not exist: %s. Use listFeatures to see valid features.' % parmData['FEATURE'], 'B')
                     return
 
                 parmData['ELEMENT'] = parmData['ELEMENT'].upper()
                 felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
                 if not felemRecord:
-                    colorize_msg('Invalid feature element: %s.' % parmData['ELEMENT'], 'B')
+                    colorize_msg('Feature does not exist element: %s.' % parmData['ELEMENT'], 'B')
                     return
 
             else:
@@ -3723,7 +4080,8 @@ class G2CmdShell(cmd.Cmd, object):
     def do_deleteElementFromFeature(self, arg):
         """\ndeleteElementFromFeature {"feature": "<feature_name>", "element": "<element_name>"}\n"""
 
-        if not argCheck('deleteElementFromFeature', arg, self.do_deleteElementFromFeature.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -3739,14 +4097,14 @@ class G2CmdShell(cmd.Cmd, object):
                 ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
                 if not ftypeRecord:
                     colorize_msg(
-                        'Invalid feature: %s. Use listFeatures to see valid features.' % parmData['FEATURE'], 'B')
+                        'Feature does not exist: %s. Use listFeatures to see valid features.' % parmData['FEATURE'], 'B')
                     return
 
                 parmData['ELEMENT'] = parmData['ELEMENT'].upper()
                 felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
                 if not felemRecord:
                     colorize_msg(
-                        'Invalid element: %s. Use listElements to see valid elements.' % parmData['ELEMENT'], 'B')
+                        'Element does not exist: %s. Use listElements to see valid elements.' % parmData['ELEMENT'], 'B')
                     return
 
             else:
@@ -3764,50 +4122,7 @@ class G2CmdShell(cmd.Cmd, object):
             if deleteCnt == 0:
                 print('\nRecord not found!\n')
             else:
-                colorize_msg('%s rows deleted!' % deleteCnt, 'B')
-
-    def do_deleteElement(self, arg):
-        """\ndeleteElement {"feature": "<feature_name>", "element": "<element_name>"}\n"""
-
-        if not argCheck('deleteElement', arg, self.do_deleteElement.__doc__):
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ELEMENT": arg}
-            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-            felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
-            if not felemRecord:
-                colorize_msg('Invalid element: %s. Use listElements to see valid elements.' % parmData['ELEMENT'],
-                                  'B')
-                return
-
-            usedIn = []
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_FBOM'])):
-                if int(self.cfgData['G2_CONFIG']['CFG_FBOM'][i]['FELEM_ID']) == felemRecord['FELEM_ID']:
-                    for j in range(len(self.cfgData['G2_CONFIG']['CFG_FTYPE'])):
-                        if int(self.cfgData['G2_CONFIG']['CFG_FTYPE'][j]['FTYPE_ID']) == \
-                                self.cfgData['G2_CONFIG']['CFG_FBOM'][i]['FTYPE_ID']:
-                            usedIn.append(self.cfgData['G2_CONFIG']['CFG_FTYPE'][j]['FTYPE_CODE'])
-            if usedIn:
-                colorize_msg(
-                    'Can\'t delete %s, it is used in these feature(s): %s' % (parmData['ELEMENT'], usedIn), 'B')
-                return
-            else:
-                deleteCnt = 0
-                for i in range(len(self.cfgData['G2_CONFIG']['CFG_FELEM'])):
-                    if int(self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID']) == felemRecord['FELEM_ID']:
-                        del self.cfgData['G2_CONFIG']['CFG_FELEM'][i]
-                        deleteCnt = 1
-                        self.configUpdated = True
-                        break
-
-                if deleteCnt == 0:
-                    print('\nRecord not found!\n')
-                else:
-                    colorize_msg('%s rows deleted!' % deleteCnt, 'B')
+                colorize_msg('Successfully deleted!', 'success')
 
     def do_listExpressionCalls(self, arg):
         """\nlistExpressionCalls [search_filter]\n"""
@@ -3921,7 +4236,7 @@ class G2CmdShell(cmd.Cmd, object):
         recordList = self.getRecordList('CFG_GENERIC_THRESHOLD')
         for i in range(len(recordList)):
             try:
-                recordList[i]['BEHAVIOR_ORDER'] = self.behavior_sort_order.index(recordList[i]['BEHAVIOR'])
+                recordList[i]['BEHAVIOR_ORDER'] = self.valid_behavior_codes.index(recordList[i]['BEHAVIOR'])
             except:
                 recordList[i]['BEHAVIOR_ORDER'] = 99
 
@@ -3946,7 +4261,8 @@ class G2CmdShell(cmd.Cmd, object):
         """
         \n\taddGenericThreshold {"plan": "load", "behavior": "<behavior_type>", "feature": "<feature>", "scoringCap": 99, "candidateCap": 99, "sendToRedo": "Yes"}
         """
-        if not argCheck('do_addGenericThreshold', arg, self.do_addGenericThreshold.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -3956,57 +4272,58 @@ class G2CmdShell(cmd.Cmd, object):
             parmData['SCORINGCAP'] = int(parmData['SCORINGCAP'])
             parmData['CANDIDATECAP'] = int(parmData['CANDIDATECAP'])
             parmData['SENDTOREDO'] = parmData.get('SENDTOREDO', 'Yes').upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        if parmData['PLAN'] not in ('LOAD', 'SEARCH'):
+            print('\nPlan must either be "LOAD" or "SEARCH"\n')
+            return
+        gplan_id = 1 if parmData['PLAN'] == 'LOAD' else 2
+
+        behaviorData = parseFeatureBehavior(parmData['BEHAVIOR'])
+        if not behaviorData:
+            print(f"\n{parmData['BEHAVIOR']} is not a valid feature behavior\n")
+            return
+
+        if 'FEATURE' in parmData:
+            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+            if not ftypeRecord:
+                print(f"\n{parmData['FEATURE']} is not a valid feature\n")
+                return
+            elif getFeatureBehavior(ftypeRecord) != parmData['BEHAVIOR']:
+                print(f"\nFeature behavior is {getFeatureBehavior(ftypeRecord)} and does not match threshold behavior {parmData['BEHAVIOR']}\n")
+                return
+            ftypeID = ftypeRecord['FTYPE_ID']
         else:
-            if parmData['PLAN'] not in ('LOAD', 'SEARCH'):
-                print('\nPlan must either be "LOAD" or "SEARCH"\n')
-                return
-            gplan_id = 1 if parmData['PLAN'] == 'LOAD' else 2
+            ftypeID = 0
 
-            featureBehaviorDict = parseFeatureBehavior(parmData['BEHAVIOR'])
-            if not featureBehaviorDict:
-                print(f"\n{parmData['BEHAVIOR']} is not a valid feature behavior\n")
-                return
+        if parmData['SENDTOREDO'] not in ('YES', 'NO'):
+            print('\nSendToRedo must be "Yes" or "No"\n')
+            return
 
-            if 'FEATURE' in parmData:
-                ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-                if not ftypeRecord:
-                    print(f"\n{parmData['FEATURE']} is not a valid feature\n")
-                    return
-                elif getFeatureBehavior(ftypeRecord) != parmData['BEHAVIOR']:
-                    print(f"\nFeature behavior is {getFeatureBehavior(ftypeRecord)} and does not match threshold behavior {parmData['BEHAVIOR']}\n")
-                    return
-                ftypeID = ftypeRecord['FTYPE_ID']
-            else:
-                ftypeID = 0
+        listID = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'])):
+            if self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['GPLAN_ID'] == gplan_id and \
+               self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['BEHAVIOR'] == parmData['BEHAVIOR'] and \
+               self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['FTYPE_ID'] == ftypeID:
+                listID = i
+        if listID:
+            print('\nGeneric threshold already exists.  Use setGenericThreshold to update it.\n')
+            return
 
-            if parmData['SENDTOREDO'] not in ('YES', 'NO'):
-                print('\nSendToRedo must be "Yes" or "No"\n')
-                return
-
-            listID = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'])):
-                if self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['GPLAN_ID'] == gplan_id and \
-                   self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['BEHAVIOR'] == parmData['BEHAVIOR'] and \
-                   self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['FTYPE_ID'] == ftypeID:
-                    listID = i
-            if listID:
-                print('\nGeneric threshold already exists.  Use setGenericThreshold to update it.\n')
-                return
-
-            newRecord = {}
-            newRecord['GPLAN_ID'] = gplan_id
-            newRecord['BEHAVIOR'] = parmData['BEHAVIOR']
-            newRecord['FTYPE_ID'] = ftypeID
-            newRecord['CANDIDATE_CAP'] = parmData['CANDIDATECAP']
-            newRecord['SCORING_CAP'] = parmData['SCORINGCAP']
-            newRecord['SEND_TO_REDO'] = 'Yes' if parmData['SENDTOREDO'].upper() == 'YES' else 'No'
-            self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].append(newRecord)
-            self.configUpdated = True
-            print('\nSuccessfully added!\n')
-            if self.doDebug:
-                debug(newRecord)
+        newRecord = {}
+        newRecord['GPLAN_ID'] = gplan_id
+        newRecord['BEHAVIOR'] = parmData['BEHAVIOR']
+        newRecord['FTYPE_ID'] = ftypeID
+        newRecord['CANDIDATE_CAP'] = parmData['CANDIDATECAP']
+        newRecord['SCORING_CAP'] = parmData['SCORINGCAP']
+        newRecord['SEND_TO_REDO'] = 'Yes' if parmData['SENDTOREDO'].upper() == 'YES' else 'No'
+        self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].append(newRecord)
+        self.configUpdated = True
+        print('\nSuccessfully added!\n')
+        if self.doDebug:
+            debug(newRecord)
 
     def do_setGenericThreshold(self, arg):
         """
@@ -4014,232 +4331,60 @@ class G2CmdShell(cmd.Cmd, object):
         \n\tsetGenericThreshold {"plan": "search", "behavior": "<behavior_type>", "candidateCap": 99}\n
         """
 
-        if not argCheck('setGenericThreshold', arg, self.do_setGenericThreshold.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
             parmData = dictKeysUpper(json.loads(arg))
             parmData['PLAN'] = {'LOAD': 1, 'SEARCH': 2}[parmData['PLAN'].upper()]
             parmData['BEHAVIOR'] = parmData['BEHAVIOR'].upper()
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
+
+        print()
+
+        if 'FEATURE' in parmData:
+            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+            if not ftypeRecord:
+                print(f"\n{parmData['FEATURE']} is not a valid feature\n")
+                return
+            ftypeID = ftypeRecord['FTYPE_ID']
         else:
-            print()
+            ftypeID = 0
 
-            if 'FEATURE' in parmData:
-                ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-                if not ftypeRecord:
-                    print(f"\n{parmData['FEATURE']} is not a valid feature\n")
-                    return
-                ftypeID = ftypeRecord['FTYPE_ID']
-            else:
-                ftypeID = 0
-
-            if parmData.get('SENDTOREDO') and parmData.get('SENDTOREDO').upper() not in ('YES', 'NO'):
-                print('\nSendToRedo must be "Yes" or "No"\n')
-                return
-
-            listID = -1
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'])):
-                if self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['GPLAN_ID'] == parmData['PLAN'] and \
-                   self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['BEHAVIOR'] == parmData['BEHAVIOR'] and \
-                   self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['FTYPE_ID'] == ftypeID:
-                    listID = i
-            if listID == -1:
-                colorize_msg('Threshold does not exist!')
-                return
-
-            # make the updates
-            if 'CANDIDATECAP' in parmData:
-                self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][listID]['CANDIDATE_CAP'] = int(
-                    parmData['CANDIDATECAP'])
-                colorize_msg('Candidate cap updated!')
-                self.configUpdated = True
-            if 'SCORINGCAP' in parmData:
-                self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][listID]['SCORING_CAP'] = int(parmData['SCORINGCAP'])
-                colorize_msg('Scoring cap updated!')
-                self.configUpdated = True
-
-            if 'SENDTOREDO' in parmData:
-                self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][listID]['SEND_TO_REDO'] = 'Yes' if parmData['SENDTOREDO'].upper() == 'YES' else 'No'
-                colorize_msg('Send to redo updated!')
-                self.configUpdated = True
-
-            print()
-
-    # ===== template commands =====
-
-    def do_templateAdd(self, arg):
-        """
-        \nFull syntax:
-        \n\ttemplateAdd {"feature": "<name>", "template": "<template>", "behavior": "<optional-override>", "comparison": "<optional-override>}
-        \n\nTypical use: (behavior and comparison are optional)
-        \n\ttemplateAdd {"feature": "customer_number", "template": "global_id"}
-        \n\ttemplateAdd {"feature": "customer_number", "template": "global_id", "behavior": "F1E"}
-        \n\ttemplateAdd {"feature": "customer_number", "template": "global_id", "behavior": "F1E", "comparison": "exact_comp"}
-        \n\nType "templateAdd List" to get a list of valid templates.\n
-        """
-
-        validTemplates = {}
-
-        validTemplates['GLOBAL_ID'] = {'DESCRIPTION': 'globally unique identifier (like an ssn, a credit card, or a medicare_id)',
-                                       'BEHAVIOR': ['F1', 'F1E', 'F1ES', 'A1', 'A1E', 'A1ES'],
-                                       'CANDIDATES': ['No'],
-                                       'STANDARDIZE': ['PARSE_ID'],
-                                       'EXPRESSION': ['EXPRESS_ID'],
-                                       'COMPARISON': ['ID_COMP', 'EXACT_COMP'],
-                                       'FEATURE_CLASS': 'ISSUED_ID',
-                                       'ATTRIBUTE_CLASS': 'IDENTIFIER',
-                                       'ELEMENTS': [{'element': 'ID_NUM', 'expressed': 'No', 'compared': 'no', 'display': 'Yes'},
-                                                    {'element': 'ID_NUM_STD', 'expressed': 'Yes', 'compared': 'yes', 'display': 'No'}],
-                                       'ATTRIBUTES': [{'attribute': '<feature>', 'element': 'ID_NUM', 'required': 'Yes'}]}
-
-        validTemplates['STATE_ID'] = {'DESCRIPTION': 'state issued identifier (like a drivers license)',
-                                      'BEHAVIOR': ['F1', 'F1E', 'F1ES', 'A1', 'A1E', 'A1ES'],
-                                      'CANDIDATES': ['No'],
-                                      'STANDARDIZE': ['PARSE_ID'],
-                                      'EXPRESSION': ['EXPRESS_ID'],
-                                      'COMPARISON': ['ID_COMP'],
-                                      'FEATURE_CLASS': 'ISSUED_ID',
-                                      'ATTRIBUTE_CLASS': 'IDENTIFIER',
-                                      'ELEMENTS': [{'element': 'ID_NUM', 'expressed': 'No', 'compared': 'no', 'display': 'Yes'},
-                                                   {'element': 'STATE', 'expressed': 'No', 'compared': 'yes', 'display': 'Yes'},
-                                                   {'element': 'ID_NUM_STD', 'expressed': 'Yes', 'compared': 'yes', 'display': 'No'}],
-                                      'ATTRIBUTES': [{'attribute': '<feature>_NUMBER', 'element': 'ID_NUM', 'required': 'Yes'},
-                                                     {'attribute': '<feature>_STATE', 'element': 'STATE', 'required': 'No'}]}
-
-        validTemplates['COUNTRY_ID'] = {'DESCRIPTION': 'country issued identifier (like a passport)',
-                                        'BEHAVIOR': ['F1', 'F1E', 'F1ES', 'A1', 'A1E', 'A1ES'],
-                                        'CANDIDATES': ['No'],
-                                        'STANDARDIZE': ['PARSE_ID'],
-                                        'EXPRESSION': ['EXPRESS_ID'],
-                                        'COMPARISON': ['ID_COMP'],
-                                        'FEATURE_CLASS': 'ISSUED_ID',
-                                        'ATTRIBUTE_CLASS': 'IDENTIFIER',
-                                        'ELEMENTS': [{'element': 'ID_NUM', 'expressed': 'No', 'compared': 'no', 'display': 'Yes'},
-                                                     {'element': 'COUNTRY', 'expressed': 'No', 'compared': 'yes', 'display': 'Yes'},
-                                                     {'element': 'ID_NUM_STD', 'expressed': 'Yes', 'compared': 'yes', 'display': 'No'}],
-                                        'ATTRIBUTES': [{'attribute': '<feature>_NUMBER', 'element': 'ID_NUM', 'required': 'Yes'},
-                                                       {'attribute': '<feature>_COUNTRY', 'element': 'COUNTRY', 'required': 'No'}]}
-
-        if arg and arg.upper() == 'LIST':
-            print()
-            for template in validTemplates:
-                print('\t', template, '-', validTemplates[template]['DESCRIPTION'])
-                print('\t\tbehaviors:', validTemplates[template]['BEHAVIOR'])
-                print('\t\tcomparisons:', validTemplates[template]['COMPARISON'])
-                print()
+        if parmData.get('SENDTOREDO') and parmData.get('SENDTOREDO').upper() not in ('YES', 'NO'):
+            print('\nSendToRedo must be "Yes" or "No"\n')
             return
 
-        if not argCheck('templateAdd', arg, self.do_templateAdd.__doc__):
-            return
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-            return
-
-        feature = parmData['FEATURE'].upper() if 'FEATURE' in parmData else None
-        template = parmData['TEMPLATE'].upper() if 'TEMPLATE' in parmData else None
-        behavior = parmData['BEHAVIOR'].upper() if 'BEHAVIOR' in parmData else None
-        comparison = parmData['COMPARISON'].upper() if 'COMPARISON' in parmData else None
-
-        standardize = parmData['STANDARDIZE'].upper() if 'STANDARDIZE' in parmData else None
-        expression = parmData['EXPRESSION'].upper() if 'EXPRESSION' in parmData else None
-        candidates = parmData['CANDIDATES'].upper() if 'CANDIDATES' in parmData else None
-
-        if not feature:
-            colorize_msg('A new feature name is required', 'B')
-            return
-        if self.getRecord('CFG_FTYPE', 'FTYPE_CODE', feature):
-            colorize_msg('Feature already exists!', 'B')
+        listID = -1
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'])):
+            if self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['GPLAN_ID'] == parmData['PLAN'] and \
+               self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['BEHAVIOR'] == parmData['BEHAVIOR'] and \
+               self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['FTYPE_ID'] == ftypeID:
+                listID = i
+        if listID == -1:
+            colorize_msg('Threshold does not exist!')
             return
 
-        if not template:
-            colorize_msg('A valid template name is required', 'B')
-            return
-        if template not in validTemplates:
-            colorize_msg('template name supplied is not valid', 'B')
-            return
+        # make the updates
+        if 'CANDIDATECAP' in parmData:
+            self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][listID]['CANDIDATE_CAP'] = int(
+                parmData['CANDIDATECAP'])
+            colorize_msg('Candidate cap updated!')
+            self.configUpdated = True
+        if 'SCORINGCAP' in parmData:
+            self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][listID]['SCORING_CAP'] = int(parmData['SCORINGCAP'])
+            colorize_msg('Scoring cap updated!')
+            self.configUpdated = True
 
-        if not behavior:
-            behavior = validTemplates[template]['BEHAVIOR'][0]
-        if behavior not in validTemplates[template]['BEHAVIOR']:
-            colorize_msg('behavior code supplied is not valid for template', 'B')
-            return
+        if 'SENDTOREDO' in parmData:
+            self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][listID]['SEND_TO_REDO'] = 'Yes' if parmData['SENDTOREDO'].upper() == 'YES' else 'No'
+            colorize_msg('Send to redo updated!')
+            self.configUpdated = True
 
-        if not comparison:
-            comparison = validTemplates[template]['COMPARISON'][0]
-        if comparison not in validTemplates[template]['COMPARISON']:
-            colorize_msg('comparison code supplied is not valid for template', 'B')
-            return
-
-        if not standardize:
-            standardize = validTemplates[template]['STANDARDIZE'][0]
-        if standardize not in validTemplates[template]['STANDARDIZE']:
-            colorize_msg('standardize code supplied is not valid for template', 'B')
-            return
-
-        if not expression:
-            expression = validTemplates[template]['EXPRESSION'][0]
-        if expression not in validTemplates[template]['EXPRESSION']:
-            colorize_msg('expression code supplied is not valid for template', 'B')
-            return
-
-        if not candidates:
-            candidates = validTemplates[template]['CANDIDATES'][0]
-        if candidates not in validTemplates[template]['CANDIDATES']:
-            colorize_msg('candidates setting supplied is not valid for template', 'B')
-            return
-
-        # values that can't be overridden
-        featureClass = validTemplates[template]['FEATURE_CLASS']
-        attributeClass = validTemplates[template]['ATTRIBUTE_CLASS']
-
-        # exact comp corrections
-        if comparison == 'EXACT_COMP':
-            standardize = ''
-            expression = ''
-            candidates = 'Yes'
-
-        # build the feature
-        featureData = {'feature': feature,
-                       'behavior': behavior,
-                       'class': featureClass,
-                       'candidates': candidates,
-                       'standardize': standardize,
-                       'expression': expression,
-                       'comparison': comparison,
-                       'elementList': []}
-        for elementDict in validTemplates[template]['ELEMENTS']:
-            if not expression:
-                elementDict['expressed'] = 'No'
-            if not standardize:
-                if elementDict['display'] == 'Yes':
-                    elementDict['compared'] = 'Yes'
-                else:
-                    elementDict['compared'] = 'No'
-            featureData['elementList'].append(elementDict)
-
-        featureParm = json.dumps(featureData)
-        colorize_msg('addFeature %s' % featureParm, 'S')
-        self.do_addFeature(featureParm)
-
-        # build the attributes
-        for attributeDict in validTemplates[template]['ATTRIBUTES']:
-            attributeDict['attribute'] = attributeDict['attribute'].replace('<feature>', feature)
-
-            attributeData = {'attribute': attributeDict['attribute'].upper(),
-                             'class': attributeClass,
-                             'feature': feature,
-                             'element': attributeDict['element'].upper(),
-                             'required': attributeDict['required']}
-
-            attributeParm = json.dumps(attributeData)
-            colorize_msg('addAttribute %s' % attributeParm, 'S')
-            self.do_addAttribute(attributeParm)
-
-        return
+        print()
 
     # ===== fragment commands =====
 
@@ -4263,7 +4408,8 @@ class G2CmdShell(cmd.Cmd, object):
     def do_getFragment(self, arg):
         """\ngetFragment [id]\ngetFragment [fragment_name]\n"""
 
-        if not argCheck('getFragment', arg, self.do_getFragment.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -4281,18 +4427,18 @@ class G2CmdShell(cmd.Cmd, object):
                 searchValue = int(parmData['ID'])
             else:
                 raise ValueError(arg)
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
 
-            foundRecords = self.getRecordList('CFG_ERFRAG', searchField, searchValue)
-            if not foundRecords:
-                print('\nRecord not found!\n')
-            else:
-                print()
-                for thisRecord in sorted(foundRecords, key=lambda k: k['ERFRAG_ID']):
-                    self.print_json_record(self.getFragmentJson(thisRecord))
-                print()
+        foundRecords = self.getRecordList('CFG_ERFRAG', searchField, searchValue)
+        if not foundRecords:
+            print('\nRecord not found!\n')
+        else:
+            print()
+            for thisRecord in sorted(foundRecords, key=lambda k: k['ERFRAG_ID']):
+                self.print_json_record(self.getFragmentJson(thisRecord))
+            print()
 
     def do_deleteFragment(self, arg):
         """
@@ -4300,7 +4446,8 @@ class G2CmdShell(cmd.Cmd, object):
         \n\tdeleteFragment {"fragment": "<fragment_code>"}\n
         """
 
-        if not argCheck('deleteFragment', arg, self.do_deleteFragment.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -4318,24 +4465,25 @@ class G2CmdShell(cmd.Cmd, object):
                 searchValue = int(parmData['ID'])
             else:
                 raise ValueError(arg)
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
 
-            deleteCnt = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERFRAG']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i][searchField] == searchValue:
-                    del self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i]
-                    deleteCnt += 1
-                    self.configUpdated = True
-            if deleteCnt == 0:
-                print('\nRecord not found!\n')
-            colorize_msg('%s rows deleted!' % deleteCnt, 'B')
+        deleteCnt = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERFRAG']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i][searchField] == searchValue:
+                del self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i]
+                deleteCnt += 1
+                self.configUpdated = True
+        if deleteCnt == 0:
+            print('\nRecord not found!\n')
+        colorize_msg('Successfully deleted!', 'success')
 
     def do_setFragment(self, arg):
         """\nsetFragment {"id": "<fragment_id>", "fragment": "<fragment_code>", "source": "<fragment_source>"}\n"""
 
-        if not argCheck('setFragment', arg, self.do_setFragment.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -4353,63 +4501,64 @@ class G2CmdShell(cmd.Cmd, object):
                 searchValue = int(parmData['ID'])
             else:
                 raise ValueError(arg)
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-            print()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
 
-            # lookup fragment and error if doesn't exist
-            listID = -1
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERFRAG']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i][searchField] == searchValue:
-                    listID = i
-            if listID == -1:
-                colorize_msg('Fragment does not exist!')
-                return
+        print()
 
-            # make the updates
-            for parmCode in parmData:
-                if parmCode == 'ID':
-                    pass
+        # lookup fragment and error if doesn't exist
+        listID = -1
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERFRAG']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i][searchField] == searchValue:
+                listID = i
+        if listID == -1:
+            colorize_msg('Fragment does not exist!')
+            return
 
-                elif parmCode == 'SOURCE':
-                    # compute dependencies from source
-                    # example: './FRAGMENT[./SAME_NAME>0 and ./SAME_STAB>0] or ./FRAGMENT[./SAME_NAME1>0 and ./SAME_STAB1>0]'
-                    dependencyList = []
-                    sourceString = parmData['SOURCE']
-                    startPos = sourceString.find('FRAGMENT[')
-                    while startPos > 0:
-                        fragmentString = sourceString[startPos:sourceString.find(']', startPos) + 1]
-                        sourceString = sourceString.replace(fragmentString, '')
-                        # parse the fragment string
-                        currentFrag = 'eof'
-                        fragmentChars = list(fragmentString)
-                        potentialErrorString = ''
-                        for thisChar in fragmentChars:
-                            potentialErrorString += thisChar
-                            if thisChar == '/':
-                                currentFrag = ''
-                            elif currentFrag != 'eof':
-                                if thisChar in '| =><)':
-                                    # lookup the fragment code
-                                    fragRecord = self.getRecord('CFG_ERFRAG', 'ERFRAG_CODE', currentFrag)
-                                    if not fragRecord:
-                                        colorize_msg('Invalid fragment reference: %s' % currentFrag, 'B')
-                                        return
-                                    else:
-                                        dependencyList.append(str(fragRecord['ERFRAG_ID']))
-                                    currentFrag = 'eof'
+        # make the updates
+        for parmCode in parmData:
+            if parmCode == 'ID':
+                pass
+
+            elif parmCode == 'SOURCE':
+                # compute dependencies from source
+                # example: './FRAGMENT[./SAME_NAME>0 and ./SAME_STAB>0] or ./FRAGMENT[./SAME_NAME1>0 and ./SAME_STAB1>0]'
+                dependencyList = []
+                sourceString = parmData['SOURCE']
+                startPos = sourceString.find('FRAGMENT[')
+                while startPos > 0:
+                    fragmentString = sourceString[startPos:sourceString.find(']', startPos) + 1]
+                    sourceString = sourceString.replace(fragmentString, '')
+                    # parse the fragment string
+                    currentFrag = 'eof'
+                    fragmentChars = list(fragmentString)
+                    potentialErrorString = ''
+                    for thisChar in fragmentChars:
+                        potentialErrorString += thisChar
+                        if thisChar == '/':
+                            currentFrag = ''
+                        elif currentFrag != 'eof':
+                            if thisChar in '| =><)':
+                                # lookup the fragment code
+                                fragRecord = self.getRecord('CFG_ERFRAG', 'ERFRAG_CODE', currentFrag)
+                                if not fragRecord:
+                                    colorize_msg('Invalid fragment reference: %s' % currentFrag, 'B')
+                                    return
                                 else:
-                                    currentFrag += thisChar
-                        # next list of fragments
-                        startPos = sourceString.find('FRAGMENT[')
+                                    dependencyList.append(str(fragRecord['ERFRAG_ID']))
+                                currentFrag = 'eof'
+                            else:
+                                currentFrag += thisChar
+                    # next list of fragments
+                    startPos = sourceString.find('FRAGMENT[')
 
-            self.cfgData['G2_CONFIG']['CFG_ERFRAG'][listID]['ERFRAG_SOURCE'] = parmData['SOURCE']
-            self.cfgData['G2_CONFIG']['CFG_ERFRAG'][listID]['ERFRAG_DEPENDS'] = ','.join(dependencyList)
-            colorize_msg('Fragment source updated!')
-            self.configUpdated = True
+        self.cfgData['G2_CONFIG']['CFG_ERFRAG'][listID]['ERFRAG_SOURCE'] = parmData['SOURCE']
+        self.cfgData['G2_CONFIG']['CFG_ERFRAG'][listID]['ERFRAG_DEPENDS'] = ','.join(dependencyList)
+        colorize_msg('Fragment source updated!')
+        self.configUpdated = True
 
-            print()
+        print()
 
     def do_addFragment(self, arg):
         """
@@ -4417,7 +4566,8 @@ class G2CmdShell(cmd.Cmd, object):
         \n\n\tFor additional example structures, use getFragment or listFragments\n
         """
 
-        if not argCheck('addFragment', arg, self.do_addFragment.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -4486,14 +4636,15 @@ class G2CmdShell(cmd.Cmd, object):
             newRecord['ERFRAG_DEPENDS'] = ','.join(dependencyList)
             self.cfgData['G2_CONFIG']['CFG_ERFRAG'].append(newRecord)
             self.configUpdated = True
-            colorize_msg('Successfully added!', 'B')
+            colorize_msg('Successfully added!', 'success')
             if self.doDebug:
                 debug(newRecord)
 
     def do_copyFragment(self, arg):
         """\ncopyFragment {"currentFragment": "<fragment_code>", "newID": "<fragment_id>", "newFragment": "<fragment_code>"}\n"""
 
-        if not argCheck('copyFragment', arg, self.do_copyFragment.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -4566,7 +4717,8 @@ class G2CmdShell(cmd.Cmd, object):
     def do_getRule(self, arg):
         """\ngetRule [id]\ngetRule [name]\n"""
 
-        if not argCheck('getRule', arg, self.do_getRule.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -4585,23 +4737,24 @@ class G2CmdShell(cmd.Cmd, object):
                 searchValue = int(parmData['ID'])
             else:
                 raise ValueError(arg)
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
 
-            foundRecords = self.getRecordList('CFG_ERRULE', searchField, searchValue)
-            if not foundRecords:
-                print('\nRecord not found!\n')
-            else:
-                print()
-                for thisRecord in sorted(foundRecords, key=lambda k: k['ERRULE_ID']):
-                    self.print_json_record(self.getRuleJson(thisRecord))
-                print()
+        foundRecords = self.getRecordList('CFG_ERRULE', searchField, searchValue)
+        if not foundRecords:
+            print('\nRecord not found!\n')
+        else:
+            print()
+            for thisRecord in sorted(foundRecords, key=lambda k: k['ERRULE_ID']):
+                self.print_json_record(self.getRuleJson(thisRecord))
+            print()
 
     def do_deleteRule(self, arg):
         """\ndeleteRule {"id": "<rule_id>"}\n"""
 
-        if not argCheck('deleteRule', arg, self.do_getRule.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -4620,19 +4773,19 @@ class G2CmdShell(cmd.Cmd, object):
                 searchValue = int(parmData['ID'])
             else:
                 raise ValueError(arg)
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
 
-            deleteCnt = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERRULE']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_ERRULE'][i][searchField] == searchValue:
-                    del self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]
-                    deleteCnt += 1
-                    self.configUpdated = True
-            if deleteCnt == 0:
-                colorize_msg('Record not found!', 'S')
-            colorize_msg('%s rows deleted!' % deleteCnt, 'B')
+        deleteCnt = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERRULE']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_ERRULE'][i][searchField] == searchValue:
+                del self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]
+                deleteCnt += 1
+                self.configUpdated = True
+        if deleteCnt == 0:
+            colorize_msg('Record not found!', 'S')
+        colorize_msg('Successfully deleted!', 'success')
 
     def do_setRule(self, arg):
         """
@@ -4649,83 +4802,85 @@ class G2CmdShell(cmd.Cmd, object):
                 - relate
                 - rtype    <-this is the relationship type 1=Resolve, 2=Possible match, 3=Possibly related, 4=Name only
         """
-        if not argCheck('setRule', arg, self.do_setRule.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
             parmData = dictKeysUpper(json.loads(arg))
             parmData['ID'] = int(parmData['ID'])
 
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
-        else:
-            print()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
+            return
 
-            # lookup rule and error if doesn't exist
-            listID = -1
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERRULE'])):
-                if self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]['ERRULE_ID'] == parmData['ID']:
-                    listID = i
-            if listID == -1:
-                colorize_msg('Rule %s does not exist!' % parmData['ID'])
+        print()
+
+        # lookup rule and error if doesn't exist
+        listID = -1
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERRULE'])):
+            if self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]['ERRULE_ID'] == parmData['ID']:
+                listID = i
+        if listID == -1:
+            colorize_msg('Rule %s does not exist!' % parmData['ID'])
+            return
+
+        if parmData.get('RESOLVE'):
+            if parmData['RESOLVE'].upper() not in ('YES', 'NO'):
+                colorize_msg('ERROR: Resolve should be Yes or No', 'B')
                 return
+            if parmData['RESOLVE'].upper() == 'YES':
+                parmData['RELATE'] = 'No'
+                parmData['RTYPE_ID'] = 1
 
-            if parmData.get('RESOLVE'):
-                if parmData['RESOLVE'].upper() not in ('YES', 'NO'):
-                    colorize_msg('ERROR: Resolve should be Yes or No', 'B')
-                    return
-                if parmData['RESOLVE'].upper() == 'YES':
-                    parmData['RELATE'] = 'No'
-                    parmData['RTYPE_ID'] = 1
+        if parmData.get('RELATE'):
+            if parmData['RELATE'].upper() not in ('YES', 'NO'):
+                colorize_msg('ERROR: Relate should be Yes or No', 'B')
+                return
+            if parmData['RELATE'].upper() == 'YES':
+                if parmData.get('RTYPE_ID'):
+                    if parmData.get('RTYPE_ID') not in (2,3,4):
+                        colorize_msg('ERROR: Relationship type (RTYPE_ID) must be 2 (possible match), 3 (possibly related) or 4 (name only)', 'B')
+                        return
+                elif self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RTYPE_ID'] == 1:
+                    parmData['RTYPE_ID'] = 2
 
-            if parmData.get('RELATE'):
-                if parmData['RELATE'].upper() not in ('YES', 'NO'):
-                    colorize_msg('ERROR: Relate should be Yes or No', 'B')
-                    return
-                if parmData['RELATE'].upper() == 'YES':
-                    if parmData.get('RTYPE_ID'):
-                        if parmData.get('RTYPE_ID') not in (2,3,4):
-                            colorize_msg('ERROR: Relationship type (RTYPE_ID) must be 2 (possible match), 3 (possibly related) or 4 (name only)', 'B')
-                            return
-                    elif self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RTYPE_ID'] == 1:
-                        parmData['RTYPE_ID'] = 2
+        if parmData.get('RULE'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['ERRULE_CODE'] = parmData['RULE']
+            colorize_msg('Rule code updated!')
+            self.configUpdated = True
 
-            if parmData.get('RULE'):
-                self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['ERRULE_CODE'] = parmData['RULE']
-                colorize_msg('Rule code updated!')
-                self.configUpdated = True
+        if parmData.get('DESC'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['ERRULE_DESC'] = parmData['DESC']
+            colorize_msg('Rule description updated!')
+            self.configUpdated = True
 
-            if parmData.get('DESC'):
-                self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['ERRULE_DESC'] = parmData['DESC']
-                colorize_msg('Rule description updated!')
-                self.configUpdated = True
+        if parmData.get('FRAGMENT'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['QUAL_ERFRAG_CODE'] = parmData['FRAGMENT']
+            colorize_msg('Rule fragment updated!')
+            self.configUpdated = True
 
-            if parmData.get('FRAGMENT'):
-                self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['QUAL_ERFRAG_CODE'] = parmData['FRAGMENT']
-                colorize_msg('Rule fragment updated!')
-                self.configUpdated = True
+        if parmData.get('DISQUALIFIER'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['DISQ_ERFRAG_CODE'] = parmData['DISQUALIFIER']
+            colorize_msg('Rule disqualifier updated!')
+            self.configUpdated = True
 
-            if parmData.get('DISQUALIFIER'):
-                self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['DISQ_ERFRAG_CODE'] = parmData['DISQUALIFIER']
-                colorize_msg('Rule disqualifier updated!')
-                self.configUpdated = True
+        if parmData.get('RESOLVE'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RESOLVE'] = parmData['RESOLVE'].capitalize()
+            colorize_msg('Rule resolve updated!')
+            self.configUpdated = True
 
-            if parmData.get('RESOLVE'):
-                self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RESOLVE'] = parmData['RESOLVE'].capitalize()
-                colorize_msg('Rule resolve updated!')
-                self.configUpdated = True
+        if parmData.get('RELATE'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RELATE'] = parmData['RELATE'].capitalize()
+            colorize_msg('Rule relate updated!')
+            self.configUpdated = True
 
-            if parmData.get('RELATE'):
-                self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RELATE'] = parmData['RELATE'].capitalize()
-                colorize_msg('Rule relate updated!')
-                self.configUpdated = True
+        if parmData.get('RTYPE_ID'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RTYPE_ID'] = parmData['RTYPE_ID']
+            colorize_msg('Relationship type (RTYPE_ID) updated!')
+            self.configUpdated = True
 
-            if parmData.get('RTYPE_ID'):
-                self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RTYPE_ID'] = parmData['RTYPE_ID']
-                colorize_msg('Relationship type (RTYPE_ID) updated!')
-                self.configUpdated = True
-
-            print()
+        print()
 
     def do_addRule(self, arg):
         """
@@ -4733,7 +4888,8 @@ class G2CmdShell(cmd.Cmd, object):
         \n\n\tFor additional example structures, use getRule or listRules\n
         """
 
-        if not argCheck('addRule', arg, self.do_addRule.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
@@ -4807,7 +4963,7 @@ class G2CmdShell(cmd.Cmd, object):
 
             self.cfgData['G2_CONFIG']['CFG_ERRULE'].append(newRecord)
             self.configUpdated = True
-            colorize_msg('Successfully added!', 'B')
+            colorize_msg('Successfully added!', 'success')
             if self.doDebug:
                 debug(newRecord)
 
@@ -4825,12 +4981,13 @@ class G2CmdShell(cmd.Cmd, object):
         """\nsetSystemParameter {"parameter": "<value>"}\n"""
 
         validParameters = ('relationshipsBreakMatches')
-        if not argCheck('templateAdd', arg, self.do_setSystemParameter.__doc__):
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
             parmData = json.loads(arg)  # don't want these upper
-        except (ValueError, KeyError) as e:
-            argError(arg, e)
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Invalid parameter: {err}', 'error')
             return
 
         # not really expecting a list here, getting the dictionary key they used
@@ -4862,46 +5019,38 @@ class G2CmdShell(cmd.Cmd, object):
         self.configUpdated = True
         print()
 
-    # ===== match levels  =====
-
-    def do_listMatchLevels(self, arg):
-        """\nlistMatchLevels [search_filter]\n"""
-
-        json_lines = []
-        for rtypeRecord in sorted(self.getRecordList('CFG_RTYPE'), key=lambda k: k['RTYPE_ID']):
-            if arg and arg.lower() not in str(rtypeRecord).lower():
-                continue
-            json_lines.append({"level": rtypeRecord["RTYPE_ID"], "code": rtypeRecord["RTYPE_CODE"],
-                               "class": self.getRecord("CFG_RCLASS", "RCLASS_ID", rtypeRecord["RCLASS_ID"])[
-                                   "RCLASS_DESC"]})
-
-        self.print_json_lines(json_lines)
-
     # ===== Class Utils =====
 
-    def printResponse(self, response):
-
-        if response:
-            self.jsonOutput(response.decode().rstrip())
-        else:
-            colorize_msg('Empty response!', 'B')
-
-    def print_json_record(self, response):
-        response = response.decode() if isinstance(response, bytearray) else response
-        if not type(response) in (dict, list):
-            response = json.loads(response)
+    def print_json_record(self, json_obj):
+        if type(json_obj) not in [dict, list]:
+            json_obj = json.loads(json_obj)
 
         if self.current_get_format == 'json':
-            json_str = json.dumps(response, indent=4)
+            json_str = json.dumps(json_obj, indent=4)
         else:
-            json_str = json.dumps(response)
+            json_str = json.dumps(json_obj)
 
         if self.pygmentsInstalled:
-            print('\n' + highlight(json_str, lexers.JsonLexer(), formatters.TerminalFormatter()))
+            render_string = highlight(json_str, lexers.JsonLexer(), formatters.TerminalFormatter())
         else:
-            print(f'\n{colorize_json(json_str)}\n')
+            render_string = colorize_json(json_str)
+
+        if len(render_string.split('\n')) < 500:
+            print(f'\n{render_string}\n')
+        else:
+            less = subprocess.Popen(["less", '-FMXSR'], stdin=subprocess.PIPE)
+            try:
+                less.stdin.write(render_string.encode('utf-8'))
+            except IOError:
+                pass
+            less.stdin.close()
+            less.wait()
 
     def print_json_lines(self, json_lines, display_header=''):
+        if not json_lines:
+            colorize_msg('Nothing to display', 'warning')
+            return
+
         if self.current_list_format == 'table' and not prettytable:
             print('\nPlease install python pretty table (pip3 install prettytable)\n')
             return
@@ -4913,7 +5062,7 @@ class G2CmdShell(cmd.Cmd, object):
             tblColumns = list(json_lines[0].keys())
             columnHeaderList = []
             for attr_name in tblColumns:
-                columnHeaderList.append(colorize(attr_name,'highlight2'))
+                columnHeaderList.append(colorize(attr_name,'attr_color'))
             table_object = prettytable.PrettyTable()
             table_object.field_names = columnHeaderList
             row_count = 0
@@ -4962,12 +5111,6 @@ class G2CmdShell(cmd.Cmd, object):
 # ===== Utility functions =====
 
 
-def parse(argumentString):
-    """Parses an argument list into a logical set of argument strings"""
-
-    return shlex.split(argumentString)
-
-
 def getFeatureBehavior(feature):
     featureBehavior = feature['FTYPE_FREQ']
     if str(feature['FTYPE_EXCL']).upper() in ('1', 'Y', 'YES'):
@@ -4991,39 +5134,6 @@ def parseFeatureBehavior(behaviorCode):
     else:
         behaviorDict = None
     return behaviorDict
-
-
-def xargCheck(func, arg, docstring):
-    if len(arg.strip()) == 0:
-        cmd_obj.do_help(func)
-        return False
-    return True
-
-
-def xargError(errorArg, error):
-    colorize_msg(f'Incorrect argument(s) or error parsing argument: {errorArg}', 'S')
-    colorize_msg(f'Error: {error}', 'E')
-
-
-def xcolorize_msg(ln, pos=''):
-    pos = pos.upper()
-    if pos == 'S' or pos == 'START':
-        print(f'\n{ln}')
-    elif pos == 'E' or pos == 'END':
-        print(f'{ln}\n')
-    elif pos == 'B' or pos == 'BOTH':
-        print(f'\n{ln}\n')
-    else:
-        print(f'{ln}')
-
-
-def printResponse(response):
-    if response:
-        response = response.decode() if isinstance(response, bytearray) else response
-        print(f'\n{response}\n')
-        return
-
-    colorize_msg('Empty response!', 'B')
 
 
 def dictKeysUpper(dictionary):
