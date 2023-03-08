@@ -236,8 +236,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         # Setup for pretty printing
         self.pygmentsInstalled = True if 'pygments' in sys.modules else False
-        self.current_get_format = 'json'
-        self.current_list_format = 'table' if prettytable else 'jsonl'
+        self.current_output_format = 'table' if prettytable else 'jsonl'
 
         # Readline and history
         self.readlineAvail = True if 'readline' in sys.modules else False
@@ -820,7 +819,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             getConfigList [optional_output_format]
         """
-        arg = self.check_arg_for_get_format(arg)
+        arg = self.check_arg_for_output_format(arg)
         try:
             response = bytearray()
             self.g2_configmgr.getConfigList(response)
@@ -841,7 +840,7 @@ class G2CmdShell(cmd.Cmd, object):
         Caution:
             These listings will only be understood by Senzing engineers
         """
-        arg = self.check_arg_for_list_format(arg) # checking for list here even though a get as it
+        arg = self.check_arg_for_output_format(arg) # checking for list here even though a get as it
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -927,52 +926,32 @@ class G2CmdShell(cmd.Cmd, object):
 
 # ===== settings section =====
 
-    def do_setGetFormat(self, arg):
+    def do_setOutputFormat(self, arg):
         """
         Syntax:
-            setGetFormat [json/jsonl]
+            setOutputFormat [table/jsonl/json]
         """
         if not arg:
-            colorize_msg(f'current format is {self.current_get_format}', 'info')
-            return
-        if arg.lower() not in ('json', 'jsonl'):
-            colorize_msg(f'format must be json (tall json) or jsonl! (json lines)', 'error')
-        else:
-            self.current_get_format = arg.lower()
-            print()
-
-    def do_setListFormat(self, arg):
-        """
-        Syntax:
-            setListFormat [table/jsonl/json]
-        """
-        if not arg:
-            colorize_msg(f'current format is {self.current_list_format}', 'info')
+            colorize_msg(f'current format is {self.current_output_format}', 'info')
             return
         if arg.lower() not in ('table', 'json', 'jsonl'):
             colorize_msg(f'format must be table, json (tall json) or jsonl (json lines)', 'error')
+        elif arg.lower() == 'table' and not prettytable:
+            colorize_msg('\nPlease install python pretty table to use this option (pip3 install prettytable)\n', 'warning')
         else:
-            self.current_list_format = arg.lower()
+            self.current_output_format = arg.lower()
             print()
 
-    def check_arg_for_get_format(self, arg):
+    def check_arg_for_output_format(self, arg):
         if not arg:
             return arg
         new_arg = []
         for token in arg.split():
-            if token.lower() in ('json', 'jsonl'):
-                self.current_get_format = token.lower()
-            else:
-                new_arg.append(token)
-        return ' '.join(new_arg)
-
-    def check_arg_for_list_format(self, arg):
-        if not arg:
-            return arg
-        new_arg = []
-        for token in arg.split():
-            if token.lower() in ('table', 'json', 'jsonl'):
-                self.current_list_format = token.lower()
+            if token.lower() == 'table' and not prettytable:
+                colorize_msg('\nOutput to table ignored as prettytable not installed (pip3 install prettytable)\n', 'warning')
+                arg = arg.replace(token, '')
+            elif token.lower() in ('table', 'json', 'jsonl'):
+                self.current_output_format = token.lower()
                 arg = arg.replace(token, '')
             else:
                 new_arg.append(token)
@@ -1015,27 +994,35 @@ class G2CmdShell(cmd.Cmd, object):
                 recordList.append(record)
         return recordList
 
-    def checkDesiredRecordID(self, table, field, value):
+    def checkDesiredRecordID(self, table, field, value, **kwargs):
 
         # turn even single values into list to simplify code
         # be sure to make last item in list the ID or order to be tested/incremented!
-        if not isinstance(field, list):
-            field = [field]
-            value = [value]
+        if isinstance(field, list):
+            if len(field) > 1:
+                senior_field = field[0:-1]
+                senior_value = value[0:-1]
+            field = field[-1]
+            value = value[-1]
+        else:
+            senior_field = []
+            senior_value = []
 
-        desired_id = value[-1]
+        desired_id = value
         id_taken = False
-        last_id = 1000
+        last_id = kwargs.get('seed_order', 1000)
         for record in self.cfgData['G2_CONFIG'][table]:
-            matched = True
-            for i in range(len(field)):
-                if record[field[i]] != value[i]:
-                    matched = False
+            senior_key_match = True
+            for i in range(len(senior_field)):
+                if record[senior_field[i]] != senior_value[i]:
+                    senior_key_match = False
                     break
-            if matched:
-                id_taken = True
-            if record[field[-1]] > last_id:
-                last_id = record[field[-1]]
+            if senior_key_match:
+                matched = record[field] == value
+                if matched:
+                    id_taken = True
+                if record[field] > last_id:
+                    last_id = record[field]
         return desired_id if desired_id > 0 and not id_taken else last_id + 1
 
     def lookupDatasource(self, dataSource):
@@ -1081,7 +1068,7 @@ class G2CmdShell(cmd.Cmd, object):
         else:
             return False, f'Behavior code "{behaviorCode}" is not valid! use command "listReferenceCodes behaviorCodes" to see the list'
 
-    def lookupStandardizeFunction(self, standardizeFunction):
+    def lookupStandardizationFunction(self, standardizeFunction):
         funcRecord = self.getRecord('CFG_SFUNC', 'SFUNC_CODE', standardizeFunction)
         if funcRecord:
             return funcRecord, f'Standardize function "{standardizeFunction}" is valid!"'
@@ -1101,6 +1088,13 @@ class G2CmdShell(cmd.Cmd, object):
             return funcRecord, f'Comparison function "{comparisonFunction}" is valid!"'
         else:
             return False, f'Comparison function "{comparisonFunction}" is not valid! use command "listComparisonFunctions" to see the list'
+
+    def lookupDistinctnessFunction(self, distinctFunction):
+        funcRecord = self.getRecord('CFG_DFUNC', 'DFUNC_CODE', distinctFunction)
+        if funcRecord:
+            return funcRecord, f'Distinctness function "{distinctFunction}" is valid!"'
+        else:
+            return False, f'Distinctness function "{distinctFunction}" is not valid! use command "listDistinctnessFunctions" to see the list'
 
     def validateDomain(self, attr, value, domain_list):
         if not value:
@@ -1126,22 +1120,6 @@ class G2CmdShell(cmd.Cmd, object):
 
 
 # ===== data Source commands =====
-
-    def do_listDataSources(self, arg):
-        """
-        Returns the list of registered data sources
-
-        Syntax:
-            listDataSources [optional_search_filter]
-        """
-        arg = self.check_arg_for_list_format(arg)
-        json_lines = []
-        for dsrcRecord in sorted(self.getRecordList('CFG_DSRC'), key=lambda k: k['DSRC_ID']):
-            if arg and arg.lower() not in str(dsrcRecord).lower():
-                continue
-            json_lines.append({"id": dsrcRecord['DSRC_ID'], "dataSource": dsrcRecord['DSRC_CODE']})
-
-        self.print_json_lines(json_lines)
 
     def do_addDataSource(self, arg):
         """
@@ -1203,6 +1181,22 @@ class G2CmdShell(cmd.Cmd, object):
         if self.doDebug:
             debug(newRecord)
 
+    def do_listDataSources(self, arg):
+        """
+        Returns the list of registered data sources
+
+        Syntax:
+            listDataSources [optional_search_filter] [optional_output_format=table/json/jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+        json_lines = []
+        for dsrcRecord in sorted(self.getRecordList('CFG_DSRC'), key=lambda k: k['DSRC_ID']):
+            if arg and arg.lower() not in str(dsrcRecord).lower():
+                continue
+            json_lines.append({"id": dsrcRecord['DSRC_ID'], "dataSource": dsrcRecord['DSRC_CODE']})
+
+        self.print_json_lines(json_lines)
+
     def do_deleteDataSource(self, arg):
         """
         Delete an existing data source
@@ -1250,7 +1244,7 @@ class G2CmdShell(cmd.Cmd, object):
             addFeature {json_configuration}
 
         Examples:
-            see listFeatures or getFeature [feature] for examples
+            see listFeatures or getFeature for examples of json configurations
 
         Notes:
             The best way to add a feature is via templateAdd as it adds both the feature and its attributes.
@@ -1325,7 +1319,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         sfuncID = 0
         if parmData.get('STANDARDIZE'):
-            sfuncRecord, message = self.lookupStandardizeFunction(parmData['STANDARDIZE'])
+            sfuncRecord, message = self.lookupStandardizationFunction(parmData['STANDARDIZE'])
             if not sfuncRecord:
                 colorize_msg(message, 'error')
                 return
@@ -1644,7 +1638,7 @@ class G2CmdShell(cmd.Cmd, object):
 
             # DISABLED as
             # elif parmCode == 'STANDARDIZE' and parmData['STANDARDIZE']:
-            #     sfuncRecord, message = self.lookupStandardizeFunction(parmData['STANDARDIZE'])
+            #     sfuncRecord, message = self.lookupStandardizationFunction(parmData['STANDARDIZE'])
             #     if not sfuncRecord:
             #         colorize_msg(message, 'error')
             #         error_cnt += 1
@@ -1744,9 +1738,9 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of registered features
 
         Syntax:
-            listFeatures [optional_search_filter]
+            listFeatures [optional_search_filter] [optional_output_format=table/json/jsonl]
         """
-        arg = self.check_arg_for_list_format(arg)
+        arg = self.check_arg_for_output_format(arg)
         json_lines = []
         for ftypeRecord in sorted(self.getRecordList('CFG_FTYPE'), key=lambda k: k['FTYPE_ID']):
             featureJson = self.formatFeatureJson(ftypeRecord)
@@ -1761,12 +1755,12 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a specific feature's json configuration
 
         Syntax:
-            getFeature [feature]
+            getFeature [feature] [optional_output_format=table/json/jsonl]
 
         Example:
-            getFeature NAME
+            getFeature NAME json
         """
-        arg = self.check_arg_for_get_format(arg)
+        arg = self.check_arg_for_output_format(arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -1857,7 +1851,7 @@ class G2CmdShell(cmd.Cmd, object):
             addAttribute {json_configuration}
 
         Examples:
-            see listAttributes or getAttribute [attribute] for examples
+            see listAttributes or getAttribute for examples of json configurations
 
         Notes:
             - The best way to add an attribute is via templateAdd as it adds both the feature and its attributes.
@@ -1958,9 +1952,9 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of registered attributes
 
         Syntax:
-            listAttributes [optional_search_filter] [optional_output_format]
+            listAttributes [optional_search_filter] [optional_output_format=table/json/jsonl]
         """
-        arg = self.check_arg_for_list_format(arg)
+        arg = self.check_arg_for_output_format(arg)
         json_lines = []
         for attrRecord in sorted(self.getRecordList('CFG_ATTR'), key=lambda k: k['ATTR_ID']):
             if arg and arg.lower() not in str(attrRecord).lower():
@@ -1974,7 +1968,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a specific attribute's json configuration
 
         Syntax:
-            getAttribute [attribute] [optional_output_format]
+            getAttribute [attribute] [optional_output_format=table/json/jsonl]
 
         Example:
             getAttribute NAME_FULL json
@@ -1989,11 +1983,11 @@ class G2CmdShell(cmd.Cmd, object):
         if arg and len(arg.split()) > 1:
             attrRecords = self.getRecordList('CFG_ATTR', 'ATTR_CODE', arg.split()[0])
             if attrRecords:
-                arg = self.check_arg_for_get_format(arg)
+                arg = self.check_arg_for_output_format(arg)
             else:
                 attrRecords = self.getRecordList('CFG_ATTR', 'FTYPE_CODE', arg.split()[0])
                 if attr_records:
-                    arg = self.check_arg_for_list_format(arg)
+                    arg = self.check_arg_for_output_format(arg)
         # end of hack
 
         if not arg:
@@ -2230,15 +2224,15 @@ class G2CmdShell(cmd.Cmd, object):
 
 # ===== standardization call commands =====
 
-    def do_addStandardizeCall(self, arg):
+    def do_addStandardizationCall(self, arg):
         """
         Add a new standardization call
 
         Syntax:
-            addExpressionCall {json_configuration}
+            addStandardizationCall {json_configuration}
 
         Examples:
-            see listExpressionCalls for examples
+            see listStandardizationCalls or getStandardizationCall for examples of json_configurations
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -2284,13 +2278,12 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('The specified execution order for the feature/element is already taken!', 'error')
             return
 
-        sfuncRecord, message = self.lookupStandardizeFunction(parmData['FUNCTION'])
+        sfuncRecord, message = self.lookupStandardizationFunction(parmData['FUNCTION'])
         if not sfuncRecord:
             colorize_msg(message, 'warning')
             return
         sfuncID = sfuncRecord['SFUNC_ID']
 
-        # add the expression call
         newRecord = {}
         newRecord['SFCALL_ID'] = sfcallID
         newRecord['FTYPE_ID'] = ftypeID
@@ -2328,14 +2321,14 @@ class G2CmdShell(cmd.Cmd, object):
 
         return sfcallData
 
-    def do_listStandardizeCalls(self, arg):
+    def do_listStandardizationCalls(self, arg):
         """
         Returns the list of standardization calls.
 
         Syntax:
-            listStandardizeCalls [optional_search_filter] [optional_output_format=table/json/jsonl]
+            listStandardizationCalls [optional_search_filter] [optional_output_format=table/json/jsonl]
         """
-        arg = self.check_arg_for_list_format(arg)
+        arg = self.check_arg_for_output_format(arg)
 
         json_lines = []
         for sfcallRecord in sorted(self.getRecordList('CFG_SFCALL'), key=lambda k: (k['FTYPE_ID'], k['EXEC_ORDER'])):
@@ -2346,14 +2339,14 @@ class G2CmdShell(cmd.Cmd, object):
 
         self.print_json_lines(json_lines)
 
-    def do_getStandardizeCall(self, arg):
+    def do_getStandardizationCall(self, arg):
         """
         Returns a single standarization call
 
         Syntax:
-            getStandardizeCall [id] [optional_output_format=json/jsonl]
+            getStandardizationCall [id] [optional_output_format=table/json/jsonl]
         """
-        arg = self.check_arg_for_get_format(arg)
+        arg = self.check_arg_for_output_format(arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -2371,12 +2364,12 @@ class G2CmdShell(cmd.Cmd, object):
             return
         self.print_json_record(self.formatStandardizationCallJson(sfcallRecord))
 
-    def do_deleteStandardizeCall(self, arg):
+    def do_deleteStandardizationCall(self, arg):
         """
         Deletes a standardization call
 
         Syntax:
-            deleteStandardizeCall [id]
+            deleteStandardizationCall [id]
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -2408,7 +2401,7 @@ class G2CmdShell(cmd.Cmd, object):
             addExpressionCall {json_configuration}
 
         Examples:
-            see listExpressionCalls for examples of json_configurations
+            see listExpressionCalls or getExpressionCall for examples of json_configurations
         """
 
         # uncommon examples for testing ...
@@ -2495,7 +2488,10 @@ class G2CmdShell(cmd.Cmd, object):
 
             bom_felemID = -1
             if elementData.get('ELEMENT') and elementData.get('ELEMENT').upper() != 'N/A':
-                bom_felemRecord, message = self.lookupElement(elementData['ELEMENT'].upper())
+                if bom_ftypeID:
+                    bom_felemRecord, message = self.lookupFeatureElement(elementData.get('FEATURE').upper(), elementData['ELEMENT'].upper())
+                else:
+                    bom_felemRecord, message = self.lookupElement(elementData['ELEMENT'].upper())
                 if not bom_felemRecord:
                     colorize_msg(message, 'error')
                     return
@@ -2524,7 +2520,6 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('No elements were found in the elementList!', 'error')
             return
 
-        # add the expression call
         newRecord = {}
         newRecord['EFCALL_ID'] = efcallID
         newRecord['FTYPE_ID'] = ftypeID
@@ -2598,7 +2593,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listExpressionCalls [optional_search_filter] [optional_output_format=table/json/jsonl]
         """
-        arg = self.check_arg_for_list_format(arg)
+        arg = self.check_arg_for_output_format(arg)
 
         json_lines = []
         for efcallRecord in sorted(self.getRecordList('CFG_EFCALL'), key=lambda k: (k['FTYPE_ID'], k['FELEM_ID'], k['EXEC_ORDER'])):
@@ -2614,9 +2609,9 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single expression call
 
         Syntax:
-            getExpressionCall [id] [optional_output_format=json/jsonl]
+            getExpressionCall [id] [optional_output_format=table/json/jsonl]
         """
-        arg = self.check_arg_for_get_format(arg)
+        arg = self.check_arg_for_output_format(arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -2807,6 +2802,384 @@ class G2CmdShell(cmd.Cmd, object):
 
         colorize_msg('Feature/element not found in the name hasher', 'warning')
 
+# ===== comparison call commands =====
+
+    def do_addComparisonCall(self, arg):
+        """
+        Add a new comparison call
+
+        Syntax:
+            addComparisonCall {json_configuration}
+
+        Examples:
+            see listComparisonCalls or getComparisonCall for examples of json_configurations
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['FEATURE', 'FUNCTION', 'EXECORDER', 'ELEMENTLIST'])
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
+            parmData['ID'] = int(parmData.get('ID', 0))
+            parmData['FUNCTION'] = parmData['FUNCTION'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        cfcallID = self.checkDesiredRecordID('CFG_CFCALL', 'CFCALL_ID', parmData.get('ID'))
+        if parmData.get('ID') and cfcallID != parmData['ID']:
+            colorize_msg('The specified ID is already taken! Remove it to assign the next available', 'error')
+            return
+
+        ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
+        if not ftypeRecord:
+            colorize_msg(message, 'error')
+            return
+        ftypeID = ftypeRecord['FTYPE_ID']
+
+        parmData['EXECORDER'] = 1
+        cfcallRecord = self.getRecord('CFG_CFCALL', 'FTYPE_ID', ftypeID)
+        if cfcallRecord:
+            colorize_msg(f"Comparison call for function {parmData['FEATURE']} already set!", 'warning')
+            return
+
+        cfuncRecord, message = self.lookupComparisonFunction(parmData['FUNCTION'])
+        if not cfuncRecord:
+            colorize_msg(message, 'warning')
+            return
+        cfuncID = cfuncRecord['CFUNC_ID']
+
+        # ensure we have valid elements
+        cfbomRecordList = []
+        execOrder = 0
+        for elementData in parmData['ELEMENTLIST']:
+            elementData = dictKeysUpper(elementData)
+            execOrder += 1
+
+            bom_ftypeID = ftypeID # currently elements must belong to the calling feature
+            bom_felemID = -1
+            if elementData.get('ELEMENT'):
+                bom_felemRecord, message = self.lookupFeatureElement(parmData['FEATURE'], elementData['ELEMENT'].upper())
+                if not bom_felemRecord:
+                    colorize_msg(message, 'error')
+                    return
+                else:
+                    bom_felemID = bom_felemRecord['FELEM_ID']
+            else:
+                colorize_msg(f"Element required in item {execOrder} on the element list" , 'error')
+                return
+
+            cfbomRecord = {}
+            cfbomRecord['CFCALL_ID'] = cfcallID
+            cfbomRecord['FTYPE_ID'] = bom_ftypeID
+            cfbomRecord['FELEM_ID'] = bom_felemID
+            cfbomRecord['EXEC_ORDER'] = execOrder
+            cfbomRecordList.append(cfbomRecord)
+            if self.doDebug:
+                debug(cfbomRecord, 'CFBOM build')
+
+        if len(cfbomRecordList) == 0:
+            colorize_msg('No elements were found in the elementList!', 'error')
+            return
+
+        newRecord = {}
+        newRecord['CFCALL_ID'] = cfcallID
+        newRecord['FTYPE_ID'] = ftypeID
+        newRecord['CFUNC_ID'] = cfuncID
+        newRecord['EXEC_ORDER'] = parmData['EXECORDER']
+        self.cfgData['G2_CONFIG']['CFG_CFCALL'].append(newRecord)
+        if self.doDebug:
+            debug(newRecord, 'CFCALL build')
+        self.cfgData['G2_CONFIG']['CFG_CFBOM'].extend(cfbomRecordList)
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+
+    def formatComparisonCallJson(self, cfcallRecord):
+        cfcallID = cfcallRecord['CFCALL_ID']
+        ftypeRecord1 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', cfcallRecord['FTYPE_ID'])
+        cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_ID', cfcallRecord['CFUNC_ID'])
+
+        cfcallData = {}
+        cfcallData['id'] = cfcallID
+        cfcallData['feature'] = ftypeRecord1['FTYPE_CODE'] if ftypeRecord1 else 'error'
+        cfcallData['execOrder'] = cfcallRecord['EXEC_ORDER']
+        cfcallData['function'] = cfuncRecord['CFUNC_CODE'] if cfuncRecord else 'error'
+
+        cfbomList = []
+        for cfbomRecord in sorted(self.getRecordList('CFG_CFBOM', 'CFCALL_ID', cfcallID), key=lambda k: k['EXEC_ORDER']):
+            ftypeRecord3 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', cfbomRecord['FTYPE_ID'])
+            felemRecord3 = self.getRecord('CFG_FELEM', 'FELEM_ID', cfbomRecord['FELEM_ID'])
+            cfbomData = {}
+            cfbomData['order'] = cfbomRecord['EXEC_ORDER']
+            cfbomData['element'] = felemRecord3['FELEM_CODE'] if felemRecord3 else 'error'
+            cfbomList.append(cfbomData)
+        cfcallData['elementList'] = cfbomList
+
+        return cfcallData
+
+    def do_listComparisonCalls(self, arg):
+        """
+        Returns the list of comparison calls
+
+        Syntax:
+            listComparisonCalls [optional_search_filter] [optional_output_format=table/json/jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+
+        json_lines = []
+        for cfcallRecord in sorted(self.getRecordList('CFG_CFCALL'), key=lambda k: (k['FTYPE_ID'], k['EXEC_ORDER'])):
+            cfcallJson = self.formatComparisonCallJson(cfcallRecord)
+            if arg and arg.lower() not in str(cfcallJson).lower():
+                continue
+            json_lines.append(cfcallJson)
+
+        self.print_json_lines(json_lines)
+
+    def do_getComparisonCall(self, arg):
+        """
+        Returns a single comparison call
+
+        Syntax:
+            getComparisonCall [id] [optional_output_format=table/json/jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
+            self.required_parms(parmData, ['ID'])
+            parmData['ID'] = int(parmData.get('ID', 0))
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        cfcallRecord = self.getRecord('CFG_CFCALL', 'CFCALL_ID', parmData['ID'])
+        if not cfcallRecord:
+            colorize_msg(f"Comparison call ID {parmData['ID']} does not exist", 'warning')
+            return
+        self.print_json_record(self.formatComparisonCallJson(cfcallRecord))
+
+    def do_deleteComparisonCall(self, arg):
+        """
+        Deletes a comparison call
+
+        Syntax:
+            deleteComparisonCall [id]
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
+            self.required_parms(parmData, ['ID'])
+            parmData['ID'] = int(parmData.get('ID', 0))
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        cfcallRecord = self.getRecord('CFG_CFCALL', 'CFCALL_ID', parmData['ID'])
+        if not cfcallRecord:
+            colorize_msg(f"Comparison call ID {parmData['ID']} does not exist", 'warning')
+            return
+
+        for cfbomRecord in self.getRecordList('CFG_CFBOM', 'CFCALL_ID', parmData['ID']):
+            self.cfgData['G2_CONFIG']['CFG_CFBOM'].remove(cfbomRecord)
+        self.cfgData['G2_CONFIG']['CFG_CFCALL'].remove(cfcallRecord)
+        colorize_msg(f'Successfully deleted!', 'success')
+        self.configUpdated = True
+
+
+# ===== distinctness call commands =====
+
+    def do_addDistinctnessCall(self, arg):
+        """
+        Add a new distinctness call
+
+        Syntax:
+            addDistinctnessCall {json_configuration}
+
+        Examples:
+            see listDistinctnessCalls or getDistinctnessCall for examples of json_configurations
+        """
+
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['FEATURE', 'FUNCTION', 'EXECORDER', 'ELEMENTLIST'])
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
+            parmData['ID'] = int(parmData.get('ID', 0))
+            parmData['FUNCTION'] = parmData['FUNCTION'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        dfcallID = self.checkDesiredRecordID('CFG_DFCALL', 'DFCALL_ID', parmData.get('ID'))
+        if parmData.get('ID') and dfcallID != parmData['ID']:
+            colorize_msg('The specified ID is already taken! Remove it to assign the next available', 'error')
+            return
+
+        ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
+        if not ftypeRecord:
+            colorize_msg(message, 'error')
+            return
+        ftypeID = ftypeRecord['FTYPE_ID']
+
+        parmData['EXECORDER'] = 1
+        dfcallRecord = self.getRecord('CFG_DFCALL', 'FTYPE_ID', ftypeID)
+        if dfcallRecord:
+            colorize_msg(f"Distinctness call for function {parmData['FEATURE']} already set!", 'warning')
+            return
+
+        dfuncRecord, message = self.lookupDistinctnessFunction(parmData['FUNCTION'])
+        if not dfuncRecord:
+            colorize_msg(message, 'warning')
+            return
+        cfuncID = dfuncRecord['CFUNC_ID']
+
+        # ensure we have valid elements
+        dfbomRecordList = []
+        execOrder = 0
+        for elementData in parmData['ELEMENTLIST']:
+            elementData = dictKeysUpper(elementData)
+            execOrder += 1
+
+            bom_ftypeID = ftypeID # currently elements must belong to the calling feature
+            bom_felemID = -1
+            if elementData.get('ELEMENT'):
+                bom_felemRecord, message = self.lookupFeatureElement(parmData['FEATURE'], elementData['ELEMENT'].upper())
+                if not bom_felemRecord:
+                    colorize_msg(message, 'error')
+                    return
+                else:
+                    bom_felemID = bom_felemRecord['FELEM_ID']
+            else:
+                colorize_msg(f"Element required in item {execOrder} on the element list" , 'error')
+                return
+
+            dfbomRecord = {}
+            dfbomRecord['DFCALL_ID'] = dfcallID
+            dfbomRecord['FTYPE_ID'] = bom_ftypeID
+            dfbomRecord['FELEM_ID'] = bom_felemID
+            dfbomRecord['EXEC_ORDER'] = execOrder
+            dfbomRecordList.append(dfbomRecord)
+            if self.doDebug:
+                debug(dfbomRecord, 'DFBOM build')
+
+        if len(dfbomRecordList) == 0:
+            colorize_msg('No elements were found in the elementList!', 'error')
+            return
+
+        newRecord = {}
+        newRecord['DFCALL_ID'] = dfcallID
+        newRecord['FTYPE_ID'] = ftypeID
+        newRecord['CFUNC_ID'] = cfuncID
+        newRecord['EXEC_ORDER'] = parmData['EXECORDER']
+        self.cfgData['G2_CONFIG']['CFG_DFCALL'].append(newRecord)
+        if self.doDebug:
+            debug(newRecord, 'DFCALL build')
+        self.cfgData['G2_CONFIG']['CFG_DFBOM'].extend(dfbomRecordList)
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+
+    def formatDistinctnessCallJson(self, dfcallRecord):
+        dfcallID = dfcallRecord['DFCALL_ID']
+        ftypeRecord1 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', dfcallRecord['FTYPE_ID'])
+        dfuncRecord = self.getRecord('CFG_DFUNC', 'DFUNC_ID', dfcallRecord['DFUNC_ID'])
+
+        dfcallData = {}
+        dfcallData['id'] = dfcallID
+        dfcallData['feature'] = ftypeRecord1['FTYPE_CODE'] if ftypeRecord1 else 'error'
+        dfcallData['execOrder'] = dfcallRecord['EXEC_ORDER']
+        dfcallData['function'] = dfuncRecord['DFUNC_CODE'] if dfuncRecord else 'error'
+
+        dfbomList = []
+        for dfbomRecord in sorted(self.getRecordList('CFG_DFBOM', 'DFCALL_ID', dfcallID), key=lambda k: k['EXEC_ORDER']):
+            ftypeRecord3 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', dfbomRecord['FTYPE_ID'])
+            felemRecord3 = self.getRecord('CFG_FELEM', 'FELEM_ID', dfbomRecord['FELEM_ID'])
+            cfbomData = {}
+            cfbomData['order'] = dfbomRecord['EXEC_ORDER']
+            cfbomData['element'] = felemRecord3['FELEM_CODE'] if felemRecord3 else 'error'
+            dfbomList.append(cfbomData)
+        dfcallData['elementList'] = dfbomList
+
+        return dfcallData
+
+    def do_listDistinctnessCalls(self, arg):
+        """
+        Returns the list of distinctness calls
+
+        Syntax:
+            listDistinctnessCalls [optional_search_filter] [optional_output_format=table/json/jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+
+        json_lines = []
+        for dfcallRecord in sorted(self.getRecordList('CFG_DFCALL'), key=lambda k: (k['FTYPE_ID'], k['EXEC_ORDER'])):
+            dfcallJson = self.formatDistinctnessCallJson(dfcallRecord)
+            if arg and arg.lower() not in str(dfcallJson).lower():
+                continue
+            json_lines.append(dfcallJson)
+
+        self.print_json_lines(json_lines)
+
+    def do_getDistinctnessCall(self, arg):
+        """
+        Returns a single distinctness call
+
+        Syntax:
+            getDistinctnessCall [id] [optional_output_format=table/json/jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
+            self.required_parms(parmData, ['ID'])
+            parmData['ID'] = int(parmData.get('ID', 0))
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        dfcallRecord = self.getRecord('CFG_DFCALL', 'DFCALL_ID', parmData['ID'])
+        if not dfcallRecord:
+            colorize_msg(f"Distinctness call ID {parmData['ID']} does not exist", 'warning')
+            return
+        self.print_json_record(self.formatDistinctnessCallJson(dfcallRecord))
+
+    def do_deleteDistinctnessCall(self, arg):
+        """
+        Deletes a distintness call
+
+        Syntax:
+            deleteDistinctnessCall [id]
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
+            self.required_parms(parmData, ['ID'])
+            parmData['ID'] = int(parmData.get('ID', 0))
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        dfcallRecord = self.getRecord('CFG_DFCALL', 'DFCALL_ID', parmData['ID'])
+        if not dfcallRecord:
+            colorize_msg(f"Distintness call ID {parmData['ID']} does not exist", 'warning')
+            return
+
+        for dfbomRecord in self.getRecordList('CFG_DFBOM', 'DFCALL_ID', parmData['ID']):
+            self.cfgData['G2_CONFIG']['CFG_DFBOM'].remove(dfbomRecord)
+        self.cfgData['G2_CONFIG']['CFG_DFCALL'].remove(dfcallRecord)
+        colorize_msg(f'Successfully deleted!', 'success')
+        self.configUpdated = True
+
 
 # ===== supporting codes =====
 
@@ -2815,7 +3188,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of internal reference codes
 
         Syntax:
-            listReferenceCodes [optional_code_type]
+            listReferenceCodes [optional_code_type] [optional_output_format=table/json/jsonl]
 
         Notes:
             reference code types include:
@@ -2824,7 +3197,7 @@ class G2CmdShell(cmd.Cmd, object):
                 featureClasses
                 attributeClasses
         """
-        arg = self.check_arg_for_list_format(arg)
+        arg = self.check_arg_for_output_format(arg)
         if arg:
             arg = arg.upper()
 
@@ -2876,20 +3249,23 @@ class G2CmdShell(cmd.Cmd, object):
                 json_lines.append({"attributeClass": attrClass})
             self.print_json_lines(json_lines, 'Attribute Classes')
 
-    def do_listStandardizeFunctions(self, arg):
+    def do_listStandardizationFunctions(self, arg):
         """
         Returns the list of standardization functions
 
         Syntax:
-            listStandardizeFunctions [optional_search_filter] [optional_output_format]
+            listStandardizeFunctions [optional_search_filter] [optional_output_format=table/json/jsonl]
         """
-        arg = self.check_arg_for_list_format(arg)
+        arg = self.check_arg_for_output_format(arg)
         json_lines = []
         for funcRecord in sorted(self.getRecordList('CFG_SFUNC'), key=lambda k: k['SFUNC_ID']):
             if arg and arg.lower() not in str(funcRecord).lower():
                 continue
             json_lines.append({"id": funcRecord["SFUNC_ID"], "function": funcRecord["SFUNC_CODE"], \
-                "connectStr": funcRecord["CONNECT_STR"]})
+                "connectStr": funcRecord["CONNECT_STR"],\
+                "language": funcRecord["LANGUAGE"],\
+                "javaClassName": funcRecord["JAVA_CLASS_NAME"]})
+
         if json_lines:
             self.print_json_lines(json_lines)
 
@@ -2898,15 +3274,19 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of expression functions
 
         Syntax:
-            listExpressionFuncstions [optional_search_filter] [optional_output_format]
+            listExpressionFuncstions [optional_search_filter] [optional_output_format=table/json/jsonl]
         """
-        arg = self.check_arg_for_list_format(arg)
+        arg = self.check_arg_for_output_format(arg)
         json_lines = []
         for funcRecord in sorted(self.getRecordList('CFG_EFUNC'), key=lambda k: k['EFUNC_ID']):
             if arg and arg.lower() not in str(funcRecord).lower():
                 continue
             json_lines.append({"id": funcRecord["EFUNC_ID"], "function": funcRecord["EFUNC_CODE"], \
-                "connectStr": funcRecord["CONNECT_STR"]})
+                "version": funcRecord["FUNC_VER"],\
+                "connectStr": funcRecord["CONNECT_STR"],\
+                "language": funcRecord["LANGUAGE"],\
+                "javaClassName": funcRecord["JAVA_CLASS_NAME"]})
+
         if json_lines:
             self.print_json_lines(json_lines)
 
@@ -2917,9 +3297,9 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of comparison functions
 
         Syntax:
-            listComparisonFunctions [optional_search_filter] [optional_output_format]
+            listComparisonFunctions [optional_search_filter] [optional_output_format=table/json/jsonl]
         """
-        arg = self.check_arg_for_list_format(arg)
+        arg = self.check_arg_for_output_format(arg)
         json_lines = []
         for funcRecord in sorted(self.getRecordList('CFG_CFUNC'), key=lambda k: k['CFUNC_ID']):
             if arg and arg.lower() not in str(funcRecord).lower():
@@ -2939,9 +3319,9 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of thresholds by comparison function return value
 
         Syntax:
-            listComparisonThresholds [optional_search_filter] [optional_output_format]
+            listComparisonThresholds [optional_search_filter] [optional_output_format=table/json/jsonl]
         """
-        arg = self.check_arg_for_list_format(arg)
+        arg = self.check_arg_for_output_format(arg)
         json_lines = []
         for funcRecord in sorted(self.getRecordList('CFG_CFUNC'), key=lambda k: k['CFUNC_ID']):
             if arg and arg.lower() not in str(funcRecord).lower():
@@ -2956,6 +3336,7 @@ class G2CmdShell(cmd.Cmd, object):
 
                 json_lines.append({"id": cfrtnRecord["CFRTN_ID"],
                                    "function": funcRecord["CFUNC_CODE"],
+                                   "execOrder": cfrtnRecord["EXEC_ORDER"],
                                    "scoreName": cfrtnRecord["CFUNC_RTNVAL"],
                                    "feature": ftypeCode,
                                    "sameScore": cfrtnRecord["SAME_SCORE"],
@@ -2967,15 +3348,36 @@ class G2CmdShell(cmd.Cmd, object):
             self.print_json_lines(json_lines)
         print()
 
-    def do_addStandardizeFunction(self, arg):
+    def do_listDistinctnessFunctions(self, arg):
+        """
+        Returns the list of distinctness functions
+
+        Syntax:
+            listDistinctnessFunctions [optional_search_filter] [optional_output_format=table/json/jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+        json_lines = []
+        for funcRecord in sorted(self.getRecordList('CFG_DFUNC'), key=lambda k: k['DFUNC_ID']):
+            if arg and arg.lower() not in str(funcRecord).lower():
+                continue
+            json_lines.append({"id": funcRecord["DFUNC_ID"], "function": funcRecord["DFUNC_CODE"], \
+                "connectStr": funcRecord["CONNECT_STR"],\
+                "anonSupport": funcRecord["ANON_SUPPORT"],\
+                "language": funcRecord["LANGUAGE"],\
+                "javaClassName": funcRecord["JAVA_CLASS_NAME"]})
+
+        if json_lines:
+            self.print_json_lines(json_lines)
+
+    def do_addStandardizationFunction(self, arg):
         """
         Adds a new standardization function
 
         Syntax:
-            addStandardizeFunc {"function":"<function_name>", "connectStr":"<plugin_base_name>"}
+            addStandardizationFunction {json_configuration}
 
-        Example:
-            addStandardizeFunc {"function":"STANDARDIZE_COUNTRY", "connectStr":"g2StdCountry"}
+        Examples:
+            see listStandardizationFunctions or examples of json_configurations
 
         Caution:
             Added a new function requires a plugin to be programmed!
@@ -2985,6 +3387,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['FUNCTION'])
+            parmData['ID'] = int(parmData.get('ID', 0))
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
         except (ValueError, KeyError) as err:
             colorize_msg(f'Syntax error: {err}', 'error')
@@ -2994,23 +3398,16 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Function already exists!', 'warning')
             return
 
-        if not parmData.get('FUNCLIB'):
-            parmData['FUNCLIB'] = 'g2func_lib'
-        if not parmData.get('VERSION'):
-            parmData['VERSION'] = '1'
-        if not parmData.get('CONNECTSTR'):
-            colorize_msg('ConnectStr must be specified.', 'error')
+        sfuncID = self.checkDesiredRecordID('CFG_SFUNC', 'SFUNC_ID', parmData.get('ID'))
+        if parmData.get('ID') and sfuncID != parmData['ID']:
+            colorize_msg('The specified ID is already taken! Remove it to assign the next available', 'error')
             return
 
-        maxID = []
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_SFUNC'])):
-            maxID.append(self.cfgData['G2_CONFIG']['CFG_SFUNC'][i]['SFUNC_ID'])
-
-        sfuncID = 0
-        if 'ID' in parmData:
-            sfuncID = int(parmData['ID'])
-        else:
-            sfuncID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
+        parmData['FUNCLIB'] = parmData.get('FUNCLIB', 'g2func_lib')
+        parmData['VERSION'] = parmData.get('VERSION', 1)
+        parmData['CONNECTSTR'] = parmData.get('CONNECTSTR', None)
+        parmData['LANGUAGE'] = parmData.get('LANGUAGE', None)
+        parmData['JAVACLASSNAME'] = parmData.get('JAVACLASSNAME', None)
 
         newRecord = {}
         newRecord['SFUNC_ID'] = sfuncID
@@ -3019,6 +3416,8 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['FUNC_LIB'] = parmData['FUNCLIB']
         newRecord['FUNC_VER'] = parmData['VERSION']
         newRecord['CONNECT_STR'] = parmData['CONNECTSTR']
+        newRecord['LANGUAGE'] = parmData['LANGUAGE']
+        newRecord['JAVA_CLASS_NAME'] = parmData['JAVACLASSNAME']
         self.cfgData['G2_CONFIG']['CFG_SFUNC'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
@@ -3030,10 +3429,10 @@ class G2CmdShell(cmd.Cmd, object):
         Adds a new expression function
 
         Syntax:
-            addExpressionFunc {"function":"<function_name>", "connectStr":"<plugin_base_name>"}
+            addExpressionFunction {json_configuration}
 
-        Example:
-            addExpressionFunc {"function":"FEAT_BUILDER", "connectStr":"g2FeatBuilder"}
+        Examples:
+            see listExpressionFunctions or examples of json_configurations
 
         Caution:
             Adding a new function requires a plugin to be programmed!
@@ -3043,6 +3442,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['FUNCTION'])
+            parmData['ID'] = int(parmData.get('ID', 0))
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
         except (ValueError, KeyError) as err:
             colorize_msg(f'Syntax error: {err}', 'error')
@@ -3052,23 +3453,16 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Function already exists!', 'warning')
             return
 
-        if not parmData.get('FUNCLIB'):
-            parmData['FUNCLIB'] = 'g2func_lib'
-        if not parmData.get('VERSION'):
-            parmData['VERSION'] = '1'
-        if not parmData.get('CONNECTSTR'):
-            colorize_msg('ConnectStr must be specified.', 'error')
+        efuncID = self.checkDesiredRecordID('CFG_EFUNC', 'EFUNC_ID', parmData.get('ID'))
+        if parmData.get('ID') and efuncID != parmData['ID']:
+            colorize_msg('The specified ID is already taken! Remove it to assign the next available', 'error')
             return
 
-        maxID = []
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_EFUNC'])):
-            maxID.append(self.cfgData['G2_CONFIG']['CFG_EFUNC'][i]['EFUNC_ID'])
-
-        efuncID = 0
-        if 'ID' in parmData:
-            efuncID = int(parmData['ID'])
-        else:
-            efuncID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
+        parmData['FUNCLIB'] = parmData.get('FUNCLIB', 'g2func_lib')
+        parmData['VERSION'] = parmData.get('VERSION', 1)
+        parmData['CONNECTSTR'] = parmData.get('CONNECTSTR', None)
+        parmData['LANGUAGE'] = parmData.get('LANGUAGE', None)
+        parmData['JAVACLASSNAME'] = parmData.get('JAVACLASSNAME', None)
 
         newRecord = {}
         newRecord['EFUNC_ID'] = efuncID
@@ -3077,6 +3471,10 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['FUNC_LIB'] = parmData['FUNCLIB']
         newRecord['FUNC_VER'] = parmData['VERSION']
         newRecord['CONNECT_STR'] = parmData['CONNECTSTR']
+        newRecord['LANGUAGE'] = parmData['LANGUAGE']
+        newRecord['JAVA_CLASS_NAME'] = parmData['JAVACLASSNAME']
+
+
         self.cfgData['G2_CONFIG']['CFG_EFUNC'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
@@ -3088,10 +3486,10 @@ class G2CmdShell(cmd.Cmd, object):
         Adds a new comparison function
 
         Syntax:
-            addComparisonFunc {"function":"<function_name>", "connectStr":"<plugin_base_name>"}
+            addComparisonFunction {json_configuration}
 
-        Example:
-            addComparisonFunc {"function":"EMAIL_COMP", "connectStr":"g2EmailComp"}
+        Examples:
+            see listComparisonFunctions or examples of json_configurations
 
         Caution:
             Adding a new function requires a plugin to be programmed!
@@ -3101,6 +3499,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['FUNCTION'])
+            parmData['ID'] = int(parmData.get('ID', 0))
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
         except (ValueError, KeyError) as err:
             colorize_msg(f'Syntax error: {err}', 'error')
@@ -3110,29 +3510,17 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Function already exists!', 'warning')
             return
 
-        if not parmData.get('FUNCLIB'):
-            parmData['FUNCLIB'] = 'g2func_lib'
-        if not parmData.get('VERSION'):
-            parmData['VERSION'] = '1'
-        if not parmData.get('CONNECTSTR'):
-            colorize_msg('ConnectStr must be specified.', 'error')
+        cfuncID = self.checkDesiredRecordID('CFG_CFUNC', 'CFUNC_ID', parmData.get('ID'))
+        if parmData.get('ID') and cfuncID != parmData['ID']:
+            colorize_msg('The specified ID is already taken! Remove it to assign the next available', 'error')
             return
-        if not parmData.get('ANONSUPPORT'):
-            parmData['ANONSUPPORT'] = 'No'
-        if not parmData.get('LANGUAGE'):
-            parmData['LANGUAGE'] = ''
-        if not parmData.get('JAVACLASSNAME'):
-            parmData['JAVACLASSNAME'] = ''
 
-        maxID = []
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFUNC'])):
-            maxID.append(self.cfgData['G2_CONFIG']['CFG_CFUNC'][i]['CFUNC_ID'])
-
-        cfuncID = 0
-        if 'ID' in parmData:
-            cfuncID = int(parmData['ID'])
-        else:
-            cfuncID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
+        parmData['FUNCLIB'] = parmData.get('FUNCLIB', 'g2func_lib')
+        parmData['VERSION'] = parmData.get('VERSION', 1)
+        parmData['ANONSUPPORT'] = parmData.get('ANONSUPPORT', 'No')
+        parmData['CONNECTSTR'] = parmData.get('CONNECTSTR', None)
+        parmData['LANGUAGE'] = parmData.get('LANGUAGE', None)
+        parmData['JAVACLASSNAME'] = parmData.get('JAVACLASSNAME', None)
 
         newRecord = {}
         newRecord['CFUNC_ID'] = cfuncID
@@ -3158,80 +3546,58 @@ class G2CmdShell(cmd.Cmd, object):
             addComparisonThreshold {json_configuration}
 
         Notes:
-            - You can listComparisonThresholds to see what the json configuration is.
-            - The best way to change one is to capture it's json from the list, then delete and re-add it.
-            - You can override the thresholds for specific features by specifying the specific feature instead of all.
+            You can override the comparison thresholds for specific features by specifying the feature instead of all.
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['ID', 'FUNCTION', 'SCORENAME'])
+            parmData['ID'] = int(parmData.get('ID', 0))
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
             parmData['SCORENAME'] = parmData['SCORENAME'].upper()
+            parmData['SAMESCORE'] = int(parmData.get('SAMESCORE', 100))
+            parmData['CLOSESCORE'] = int(parmData.get('CLOSESCORE', 90))
+            parmData['LIKELYSCORE'] = int(parmData.get('LIKELYSCORE', 80))
+            parmData['PLAUSIBLESCORE'] = int(parmData.get('PLAUSIBLESCORE', 70))
+            parmData['UNLIKELYSCORE'] = int(parmData.get('UNLIKELYSCORE', 60))
         except (ValueError, KeyError) as err:
             colorize_msg(f'Syntax error: {err}', 'error')
             return
 
-        cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_CODE', parmData['FUNCTION'])
+        cfrtnID = self.checkDesiredRecordID('CFG_CFRTN', 'CFRTN_ID', parmData.get('ID'))
+        if parmData.get('ID') and cfrtnID != parmData['ID']:
+            colorize_msg('The specified ID is already taken! Remove it to assign the next available', 'error')
+            return
+
+        cfuncRecord, message = self.lookupComparisonFunction(parmData['FUNCTION'])
         if not cfuncRecord:
-            colorize_msg('Function does not exist!', 'error')
+            colorize_msg(message, 'warning')
             return
         cfuncID = cfuncRecord['CFUNC_ID']
 
         ftypeID = 0
         if 'FEATURE' in parmData and parmData['FEATURE'].upper() != 'ALL':
-            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
+            ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
             if not ftypeRecord:
-                colorize_msg('Feature does not exist!', 'error')
+                colorize_msg(message, 'error')
                 return
             ftypeID = ftypeRecord['FTYPE_ID']
 
-        #  check for duplicated return codes
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFRTN']) - 1, -1, -1):
-            if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFUNC_ID'] == cfuncID and \
-                    self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['FTYPE_ID'] == ftypeID and \
-                    self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFUNC_RTNVAL'] == parmData['SCORENAME']:
-                colorize_msg('Comparison function return value for feature already exists!', 'warning')
-                return
+        cfcallRecord = self.getRecord('CFG_CFRTN', ['CFUNC_ID', 'CFUNC_RTNVAL', 'FTYPE_ID'], [cfuncID, parmData['SCORENAME'], ftypeID])
+        if cfcallRecord:
+            colorize_msg(f"Comparison threshold for {parmData['FUNCTION']}-{parmData['SCORENAME']}-{parmData['FEATURE']} already set!", 'warning')
+            return
 
-            # just remove the id if duplicated.  They likely just cut and pasted it.
-            if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFRTN_ID'] == parmData.get('ID', 0):
-                parmData['ID'] = 0
-
-        maxID = []
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFRTN'])):
-            maxID.append(self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFRTN_ID'])
-
-        cfrtnID = 0
-        if parmData.get('ID', 0) != 0:
-            cfrtnID = int(parmData['ID'])
+        # see if the return value already has an exec order and use it! must be in the expected order
+        cfcallRecord = self.getRecord('CFG_CFRTN', ['CFUNC_ID', 'CFUNC_RTNVAL', 'FTYPE_ID'], [cfuncID, parmData['SCORENAME'], 0])
+        if cfcallRecord:
+            execOrder = cfcallRecord['EXEC_ORDER']
+        elif parmData.get('EXECORDER'):
+            execOrder = parmData.get('EXECORDER')
         else:
-            cfrtnID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
-
-        execOrder = 0
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFRTN'])):
-            if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFUNC_ID'] == cfuncID and self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['FTYPE_ID'] == ftypeID:
-                if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['EXEC_ORDER'] > execOrder:
-                    execOrder = self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['EXEC_ORDER']
-        execOrder = execOrder + 1
-
-        sameScore = 100
-        closeScore = 90
-        likelyScore = 80
-        plausibleScore = 70
-        unlikelyScore = 60
-
-        if 'SAMESCORE' in parmData:
-            sameScore = int(parmData['SAMESCORE'])
-        if 'CLOSESCORE' in parmData:
-            closeScore = int(parmData['CLOSESCORE'])
-        if 'LIKELYSCORE' in parmData:
-            likelyScore = int(parmData['LIKELYSCORE'])
-        if 'PLAUSIBLESCORE' in parmData:
-            plausibleScore = int(parmData['PLAUSIBLESCORE'])
-        if 'UNLIKELYSCORE' in parmData:
-            unlikelyScore = int(parmData['UNLIKELYSCORE'])
+            execOrder = self.checkDesiredRecordID('CFG_CFRTN', ['CFUNC_ID', 'FTYPE_ID', 'EXEC_ORDER'], [cfuncID, 0, 0], seed_order=0)
 
         newRecord = {}
         newRecord['CFRTN_ID'] = cfrtnID
@@ -3239,11 +3605,11 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['FTYPE_ID'] = ftypeID
         newRecord['CFUNC_RTNVAL'] = parmData['SCORENAME']
         newRecord['EXEC_ORDER'] = execOrder
-        newRecord['SAME_SCORE'] = sameScore
-        newRecord['CLOSE_SCORE'] = closeScore
-        newRecord['LIKELY_SCORE'] = likelyScore
-        newRecord['PLAUSIBLE_SCORE'] = plausibleScore
-        newRecord['UN_LIKELY_SCORE'] = unlikelyScore
+        newRecord['SAME_SCORE'] = parmData['SAMESCORE']
+        newRecord['CLOSE_SCORE'] = parmData['CLOSESCORE']
+        newRecord['LIKELY_SCORE'] = parmData['LIKELYSCORE']
+        newRecord['PLAUSIBLE_SCORE'] = parmData['PLAUSIBLESCORE']
+        newRecord['UN_LIKELY_SCORE'] = parmData['UNLIKELYSCORE']
         self.cfgData['G2_CONFIG']['CFG_CFRTN'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Comparison threshold Successfully added!', 'success')
@@ -3266,16 +3632,71 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Syntax error: {err}', 'error')
             return
 
-        deleteCnt = 0
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_CFRTN']) - 1, -1, -1):
-            if self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]['CFRTN_ID'] == parmData['ID']:
-                del self.cfgData['G2_CONFIG']['CFG_CFRTN'][i]
-                deleteCnt += 1
-                self.configUpdated = True
-        if deleteCnt == 0:
-            colorize_msg('Record not found', 'caution')
-        else:
-            colorize_msg('Successfully deleted!', 'success')
+        cfrtnRecord = self.getRecord('CFG_CFRTN', 'CFRTN_ID', parmData['ID'])
+        if not cfrtnRecord:
+            colorize_msg(f"Comparison threshold ID {parmData['ID']} does not exist", 'warning')
+            return
+
+        self.cfgData['G2_CONFIG']['CFG_CFRTN'].remove(cfrtnRecord)
+        colorize_msg(f'Successfully deleted!', 'success')
+        self.configUpdated = True
+
+    def do_addDistinctnessFunction(self, arg):
+        """
+        Adds a new distinctness function
+
+        Syntax:
+            addDistinctnessFunction {json_configuration}
+
+        Examples:
+            see listDistinctnessFunctions or examples of json_configurations
+
+        Caution:
+            Adding a new function requires a plugin to be programmed!
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['FUNCTION'])
+            parmData['ID'] = int(parmData.get('ID', 0))
+            parmData['FUNCTION'] = parmData['FUNCTION'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        if self.getRecord('CFG_DFUNC', 'DFUNC_CODE', parmData['FUNCTION']):
+            colorize_msg('Function already exists!', 'warning')
+            return
+
+        dfuncID = self.checkDesiredRecordID('CFG_DFUNC', 'DFUNC_ID', parmData.get('ID'))
+        if parmData.get('ID') and dfuncID != parmData['ID']:
+            colorize_msg('The specified ID is already taken! Remove it to assign the next available', 'error')
+            return
+
+        parmData['FUNCLIB'] = parmData.get('FUNCLIB', 'g2func_lib')
+        parmData['VERSION'] = parmData.get('VERSION', 1)
+        parmData['CONNECTSTR'] = parmData.get('CONNECTSTR', None)
+        parmData['ANONSUPPORT'] = parmData.get('ANONSUPPORT', None)
+        parmData['LANGUAGE'] = parmData.get('LANGUAGE', None)
+        parmData['JAVACLASSNAME'] = parmData.get('JAVACLASSNAME', None)
+
+        newRecord = {}
+        newRecord['DFUNC_ID'] = dfuncID
+        newRecord['DFUNC_CODE'] = parmData['FUNCTION']
+        newRecord['DFUNC_DESC'] = parmData['FUNCTION']
+        newRecord['FUNC_LIB'] = parmData['FUNCLIB']
+        newRecord['FUNC_VER'] = parmData['VERSION']
+        newRecord['ANON_SUPPORT'] = parmData['ANONSUPPORT']
+        newRecord['CONNECT_STR'] = parmData['CONNECTSTR']
+        newRecord['LANGUAGE'] = parmData['LANGUAGE']
+        newRecord['JAVA_CLASS_NAME'] = parmData['JAVACLASSNAME']
+        self.cfgData['G2_CONFIG']['CFG_DFUNC'].append(newRecord)
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+        if self.doDebug:
+            debug(newRecord)
 
 
 # ===== element commands =====
@@ -3297,7 +3718,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listElements [optional_search_filter] [optional_output_format]
         """
-        arg = self.check_arg_for_list_format(arg)
+        arg = self.check_arg_for_output_format(arg)
         json_lines = []
         for felemRecord in sorted(self.getRecordList('CFG_FELEM'), key=lambda k: k['FELEM_ID']):
             if arg and arg.lower() not in str(felemRecord).lower():
@@ -3308,7 +3729,7 @@ class G2CmdShell(cmd.Cmd, object):
     def do_getElement(self, arg):
         """\ngetElement [element_name]\n"""
 
-        arg = self.check_arg_for_get_format(arg)
+        arg = self.check_arg_for_output_format(arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -3507,8 +3928,6 @@ class G2CmdShell(cmd.Cmd, object):
 
     def do_addComparisonFunc(self, arg):
         self.do_addComparisonFunction(arg)
-
-
 
     def do_addFeatureComparisonElement(self, arg):
         """\naddFeatureComparisonElement {"feature": "<feature_name>", "element": "<element_name>"}\n"""
@@ -4766,7 +5185,12 @@ class G2CmdShell(cmd.Cmd, object):
         if type(json_obj) not in [dict, list]:
             json_obj = json.loads(json_obj)
 
-        if self.current_get_format == 'json':
+        if self.current_output_format == 'table':
+            render_string = self.print_json_as_table(json_obj if type(json_obj) == list else [json_obj])
+            self.print_scrolling(render_string)
+            return
+
+        if self.current_output_format == 'json':
             json_str = json.dumps(json_obj, indent=4)
         else:
             json_str = json.dumps(json_obj)
@@ -4776,55 +5200,19 @@ class G2CmdShell(cmd.Cmd, object):
         else:
             render_string = colorize_json(json_str)
 
-        if len(render_string.split('\n')) < 500:
-            print(f'\n{render_string}\n')
-        else:
-            less = subprocess.Popen(["less", '-FMXSR'], stdin=subprocess.PIPE)
-            try:
-                less.stdin.write(render_string.encode('utf-8'))
-            except IOError:
-                pass
-            less.stdin.close()
-            less.wait()
+        print(f'\n{render_string}\n')
 
     def print_json_lines(self, json_lines, display_header=''):
         if not json_lines:
             colorize_msg('Nothing to display', 'warning')
             return
 
-        if self.current_list_format == 'table' and not prettytable:
-            print('\nPlease install python pretty table (pip3 install prettytable)\n')
-            return
-
         if display_header:
             print(f'\n{display_header}')
 
-        if self.current_list_format == 'table':
-            tblColumns = list(json_lines[0].keys())
-            columnHeaderList = []
-            for attr_name in tblColumns:
-                columnHeaderList.append(colorize(attr_name,'attr_color'))
-            table_object = prettytable.PrettyTable()
-            table_object.field_names = columnHeaderList
-            row_count = 0
-            for json_data in json_lines:
-                row_count += 1
-                tblRow = []
-                for attr_name in tblColumns:
-                    attr_value = json.dumps(json_data[attr_name]) if type(json_data[attr_name]) in (list, dict) else str(json_data[attr_name])
-                    if row_count % 2 == 0: # for future alternating colors
-                        tblRow.append(colorize(attr_value, 'dim'))
-                    else:
-                        tblRow.append(colorize(attr_value, 'dim'))
-                table_object.add_row(tblRow)
-
-            table_object.align = 'l'
-            if hasattr(prettytable, 'SINGLE_BORDER'):
-                table_object.set_style(prettytable.SINGLE_BORDER)
-            table_object.hrules = 1
-            render_string = table_object.get_string()
-
-        elif self.current_list_format == 'jsonl':
+        if self.current_output_format == 'table':
+            render_string = self.print_json_as_table(json_lines)
+        elif self.current_output_format == 'jsonl':
             render_string = ''
             for line in json_lines:
                 if self.pygmentsInstalled:
@@ -4838,6 +5226,35 @@ class G2CmdShell(cmd.Cmd, object):
             json_doc = json_doc[0:-2] + ']'
             render_string = colorize_json(json.dumps(json.loads(json_doc), indent=4))
 
+        self.print_scrolling(render_string)
+
+    def print_json_as_table(self, json_lines):
+        tblColumns = list(json_lines[0].keys())
+        columnHeaderList = []
+        for attr_name in tblColumns:
+            columnHeaderList.append(colorize(attr_name,'attr_color'))
+        table_object = prettytable.PrettyTable()
+        table_object.field_names = columnHeaderList
+        row_count = 0
+        for json_data in json_lines:
+            row_count += 1
+            tblRow = []
+            for attr_name in tblColumns:
+                attr_value = json.dumps(json_data[attr_name]) if type(json_data[attr_name]) in (list, dict) else str(json_data[attr_name])
+                if row_count % 2 == 0: # for future alternating colors
+                    tblRow.append(colorize(attr_value, 'dim'))
+                else:
+                    tblRow.append(colorize(attr_value, 'dim'))
+            table_object.add_row(tblRow)
+
+        table_object.align = 'l'
+        if hasattr(prettytable, 'SINGLE_BORDER'):
+            table_object.set_style(prettytable.SINGLE_BORDER)
+        table_object.hrules = 1
+        render_string = table_object.get_string()
+        return render_string
+
+    def print_scrolling(self, render_string):
         less = subprocess.Popen(["less", '-FMXSR'], stdin=subprocess.PIPE)
         try:
             less.stdin.write(render_string.encode('utf-8'))
@@ -4845,8 +5262,8 @@ class G2CmdShell(cmd.Cmd, object):
             pass
         less.stdin.close()
         less.wait()
-
         print()
+
 
 
 # ===== Utility functions =====
