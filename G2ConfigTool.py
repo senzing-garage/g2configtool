@@ -2240,7 +2240,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         try:
             parmData = dictKeysUpper(json.loads(arg))
-            self.required_parms(parmData, ['FUNCTION', 'EXECORDER'])
+            self.required_parms(parmData, ['FUNCTION'])
             parmData['ID'] = int(parmData.get('ID', 0))
             parmData['EXECORDER'] = int(parmData.get('EXECORDER', 0))
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
@@ -2273,8 +2273,8 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Either a feature or an element must be specified, but not both!', 'error')
             return
 
-        sfcallOrder = self.checkDesiredRecordID('CFG_SFCALL', ['FTYPE_ID', 'FELEM_ID', 'EXEC_ORDER'], [ftypeID, felemID, parmData.get('EXECORDER')])
-        if sfcallOrder != parmData['EXECORDER']:
+        sfcallOrder = self.checkDesiredRecordID('CFG_SFCALL', ['FTYPE_ID', 'FELEM_ID', 'EXEC_ORDER'], [ftypeID, felemID, parmData.get('EXECORDER')], seed_order = 0)
+        if parmData['EXECORDER'] and sfcallOrder != parmData['EXECORDER']:
             colorize_msg('The specified execution order for the feature/element is already taken!', 'error')
             return
 
@@ -2289,7 +2289,7 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['FTYPE_ID'] = ftypeID
         newRecord['FELEM_ID'] = felemID
         newRecord['SFUNC_ID'] = sfuncID
-        newRecord['EXEC_ORDER'] = parmData['EXECORDER']
+        newRecord['EXEC_ORDER'] = sfcallOrder
         self.cfgData['G2_CONFIG']['CFG_SFCALL'].append(newRecord)
         if self.doDebug:
             debug(newRecord)
@@ -2413,7 +2413,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
-            self.required_parms(parmData, ['FUNCTION', 'EXECORDER', 'ELEMENTLIST'])
+            self.required_parms(parmData, ['FUNCTION', 'ELEMENTLIST'])
             parmData['ID'] = int(parmData.get('ID', 0))
             parmData['EXECORDER'] = int(parmData.get('EXECORDER', 0))
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
@@ -2446,8 +2446,8 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Either a feature or an element must be specified, but not both!', 'error')
             return
 
-        efcallOrder = self.checkDesiredRecordID('CFG_EFCALL', ['FTYPE_ID', 'FELEM_ID', 'EXEC_ORDER'], [ftypeID, felemID, parmData.get('EXECORDER')])
-        if efcallOrder != parmData['EXECORDER']:
+        efcallOrder = self.checkDesiredRecordID('CFG_EFCALL', ['FTYPE_ID', 'FELEM_ID', 'EXEC_ORDER'], [ftypeID, felemID, parmData.get('EXECORDER')], seed_order=0)
+        if parmData['EXECORDER'] and efcallOrder != parmData['EXECORDER']:
             colorize_msg('The specified execution order for the feature/element is already taken!', 'error')
             return
 
@@ -2525,7 +2525,7 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['FTYPE_ID'] = ftypeID
         newRecord['FELEM_ID'] = felemID
         newRecord['EFUNC_ID'] = efuncID
-        newRecord['EXEC_ORDER'] = parmData['EXECORDER']
+        newRecord['EXEC_ORDER'] = efcallOrder
         newRecord['EFEAT_FTYPE_ID'] = efeatFTypeID
         newRecord['IS_VIRTUAL'] = parmData['ISVIRTUAL']
         self.cfgData['G2_CONFIG']['CFG_EFCALL'].append(newRecord)
@@ -2819,7 +2819,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
-            self.required_parms(parmData, ['FEATURE', 'FUNCTION', 'EXECORDER', 'ELEMENTLIST'])
+            self.required_parms(parmData, ['FEATURE', 'FUNCTION', 'ELEMENTLIST'])
             parmData['FEATURE'] = parmData['FEATURE'].upper()
             parmData['ID'] = int(parmData.get('ID', 0))
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
@@ -2903,7 +2903,7 @@ class G2CmdShell(cmd.Cmd, object):
         cfcallData = {}
         cfcallData['id'] = cfcallID
         cfcallData['feature'] = ftypeRecord1['FTYPE_CODE'] if ftypeRecord1 else 'error'
-        cfcallData['execOrder'] = cfcallRecord['EXEC_ORDER']
+        #cfcallData['execOrder'] = cfcallRecord['EXEC_ORDER']
         cfcallData['function'] = cfuncRecord['CFUNC_CODE'] if cfuncRecord else 'error'
 
         cfbomList = []
@@ -3009,7 +3009,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
-            self.required_parms(parmData, ['FEATURE', 'FUNCTION', 'EXECORDER', 'ELEMENTLIST'])
+            self.required_parms(parmData, ['FEATURE', 'FUNCTION', 'ELEMENTLIST'])
             parmData['FEATURE'] = parmData['FEATURE'].upper()
             parmData['ID'] = int(parmData.get('ID', 0))
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
@@ -3093,7 +3093,7 @@ class G2CmdShell(cmd.Cmd, object):
         dfcallData = {}
         dfcallData['id'] = dfcallID
         dfcallData['feature'] = ftypeRecord1['FTYPE_CODE'] if ftypeRecord1 else 'error'
-        dfcallData['execOrder'] = dfcallRecord['EXEC_ORDER']
+        #dfcallData['execOrder'] = dfcallRecord['EXEC_ORDER']
         dfcallData['function'] = dfuncRecord['DFUNC_CODE'] if dfuncRecord else 'error'
 
         dfbomList = []
