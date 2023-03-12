@@ -175,7 +175,7 @@ def colorize_msg(msg_text, msg_type_or_color = ''):
     if msg_type_or_color.upper() == 'ERROR':
         msg_color = 'bad'
     elif msg_type_or_color.upper() == 'WARNING':
-        msg_color = 'caution'
+        msg_color = 'caution,italics'
     elif msg_type_or_color.upper() == 'INFO':
         msg_color = 'highlight2'
     elif msg_type_or_color.upper() == 'SUCCESS':
@@ -271,15 +271,21 @@ class G2CmdShell(cmd.Cmd, object):
                         if line in headers:
                             current_section = line
                             if current_section == 'Caution:':
-                                line_color = 'caution'
+                                line_color = 'caution, italics'
                             else:
                                 line_color = 'highlight2'
                         elif line:
                             if current_section == 'Caution:':
-                                line_color = 'caution'
+                                line_color = 'caution, italics'
                             elif current_section not in ('Syntax:', 'Examples:', 'Example:'):
                                 line_color = 'dim'
-                        help_text += colorize(line, line_color) + '\n'
+                        if func_name[3:] in line and not line_color:
+                            sep_column = line.find(func_name[3:]) + len(func_name[3:])
+                            help_text += line[0:sep_column] + colorize(line[sep_column:], 'dim') + '\n'
+                        else:
+                            help_text += colorize(line, line_color) + '\n'
+
+
                     print(help_text)
                 else:
                     colorize_msg(f'No help text found for {func_name}', 'warning')
@@ -341,10 +347,10 @@ class G2CmdShell(cmd.Cmd, object):
             listRules               {colorize('<- to see all the principles in the order they are evaluated', 'dim')}
             listFragments           {colorize('<- to see all the fragments of rules are configured, such as what is considered close_name', 'dim')}
 
-        {colorize('CAUTION:', 'caution')}
-            {colorize('While adding or updating features, expressions, scoring thresholds and rules are discouraged without the guidance of Senzing support,', 'caution')}
-            {colorize('knowing how they are configured and what their thresholds are can help you understand why records resolved or not, leading to the', 'caution')}
-            {colorize('proper course of action when working with Senzing Support.', 'caution')}
+        {colorize('CAUTION:', 'caution, italics')}
+            {colorize('While adding or updating features, expressions, scoring thresholds and rules are discouraged without the guidance of Senzing support,', 'caution, italics')}
+            {colorize('knowing how they are configured and what their thresholds are can help you understand why records resolved or not, leading to the', 'caution, italics')}
+            {colorize('proper course of action when working with Senzing Support.', 'caution, italics')}
 
         '''))
 
@@ -395,10 +401,10 @@ class G2CmdShell(cmd.Cmd, object):
             listGenericThresholds   {colorize('<- to see when candidate keys will become generic and are no longer used to find candidates', 'dim')}
             setGenericThreshold     {colorize('<- to change when features with certain behaviors become generic', 'dim')}
 
-        {colorize('CAUTION:', 'caution')}
-            {colorize('The cost of raising generic thresholds is speed. It is always best to keep generic thresholds low and to add new', 'caution')}
-            {colorize('new expressions instead.  You can extend composite key expressions with the addToNameHash command above, or add ', 'caution')}
-            {colorize('new expressions by using the addExpressionCall command above.', 'caution')}
+        {colorize('CAUTION:', 'caution, italics')}
+            {colorize('The cost of raising generic thresholds is speed. It is always best to keep generic thresholds low and to add new', 'caution, italics')}
+            {colorize('new expressions instead.  You can extend composite key expressions with the addToNameHash command above, or add ', 'caution, italics')}
+            {colorize('new expressions by using the addExpressionCall command above.', 'caution, italics')}
 
         {colorize('Once the candidate matches have been found, scoring and rule evaluation takes place.  Scores are rolled up by behavior.', 'dim')}
         {colorize('For instance, both addresses and phones have the behavior FF (Frequency Few). If they both score above their scoring', 'dim')}
@@ -1029,19 +1035,19 @@ class G2CmdShell(cmd.Cmd, object):
         dsrcRecord = self.getRecord('CFG_DSRC', 'DSRC_CODE', dataSource)
         if dsrcRecord:
             return dsrcRecord, f'Data source "{dataSource}" already exists!'
-        return None, f'Data source "{dataSource}" does not exist!'
+        return None, f'Data source "{dataSource}" not found!'
 
     def lookupFeature(self, feature):
         ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', feature)
         if ftypeRecord:
             return ftypeRecord, f'Feature "{feature}" already exists!'
-        return None, f'Feature "{feature}" does not exist!'
+        return None, f'Feature "{feature}" not found!'
 
     def lookupElement(self, element):
         felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', element)
         if felemRecord:
             return felemRecord, f'Element "{element}" already exists!'
-        return None, f'Element "{element}" does not exist!'
+        return None, f'Element "{element}" not found!'
 
     def lookupFeatureElement(self, feature, element):
         ftypeRecord, error_text = self.lookupFeature(feature)
@@ -1058,43 +1064,43 @@ class G2CmdShell(cmd.Cmd, object):
     def lookupFeatureClass(self, featureClass):
         fclassRecord = self.getRecord('CFG_FCLASS', 'FCLASS_CODE', featureClass)
         if fclassRecord:
-            return fclassRecord, f'Feature class "{featureClass}" is valid!"'
+            return fclassRecord, f'Feature class "{featureClass}" exists!"'
         else:
-            return False, f'Feature class "{featureClass}" is not valid! use command "listReferenceCodes featureClass" to see the list'
+            return False, f'Feature class "{featureClass}" not found! use command "listReferenceCodes featureClass" to see the list'
 
     def lookupBehaviorCode(self, behaviorCode):
         if behaviorCode in self.valid_behavior_codes:
-            return parseFeatureBehavior(behaviorCode), f'Behavior code "{behaviorCode}" is valid!"'
+            return parseFeatureBehavior(behaviorCode), f'Behavior code "{behaviorCode}" exists!"'
         else:
-            return False, f'Behavior code "{behaviorCode}" is not valid! use command "listReferenceCodes behaviorCodes" to see the list'
+            return False, f'Behavior code "{behaviorCode}" not found! use command "listReferenceCodes behaviorCodes" to see the list'
 
     def lookupStandardizationFunction(self, standardizeFunction):
         funcRecord = self.getRecord('CFG_SFUNC', 'SFUNC_CODE', standardizeFunction)
         if funcRecord:
-            return funcRecord, f'Standardize function "{standardizeFunction}" is valid!"'
+            return funcRecord, f'Standardize function "{standardizeFunction}" exists!"'
         else:
-            return False, f'Standardize function "{standardizeFunction}" is not valid! use command "listStandardizeFunctions" to see the list'
+            return False, f'Standardize function "{standardizeFunction}" not found! use command "listStandardizeFunctions" to see the list'
 
     def lookupExpressionFunction(self, expressionFunction):
         funcRecord = self.getRecord('CFG_EFUNC', 'EFUNC_CODE', expressionFunction)
         if funcRecord:
-            return funcRecord, f'Expression function "{expressionFunction}" is valid!"'
+            return funcRecord, f'Expression function "{expressionFunction}" exists!"'
         else:
-            return False, f'Expression function "{expressionFunction}" is not valid! use command "listExpressionFunctions" to see the list'
+            return False, f'Expression function "{expressionFunction}" not found! use command "listExpressionFunctions" to see the list'
 
     def lookupComparisonFunction(self, comparisonFunction):
         funcRecord = self.getRecord('CFG_CFUNC', 'CFUNC_CODE', comparisonFunction)
         if funcRecord:
-            return funcRecord, f'Comparison function "{comparisonFunction}" is valid!"'
+            return funcRecord, f'Comparison function "{comparisonFunction}" exists!"'
         else:
-            return False, f'Comparison function "{comparisonFunction}" is not valid! use command "listComparisonFunctions" to see the list'
+            return False, f'Comparison function "{comparisonFunction}" not found! use command "listComparisonFunctions" to see the list'
 
     def lookupDistinctnessFunction(self, distinctFunction):
         funcRecord = self.getRecord('CFG_DFUNC', 'DFUNC_CODE', distinctFunction)
         if funcRecord:
-            return funcRecord, f'Distinctness function "{distinctFunction}" is valid!"'
+            return funcRecord, f'Distinctness function "{distinctFunction}" exists!"'
         else:
-            return False, f'Distinctness function "{distinctFunction}" is not valid! use command "listDistinctnessFunctions" to see the list'
+            return False, f'Distinctness function "{distinctFunction}" not found! use command "listDistinctnessFunctions" to see the list'
 
     def validateDomain(self, attr, value, domain_list):
         if not value:
@@ -1108,15 +1114,46 @@ class G2CmdShell(cmd.Cmd, object):
         attrRecord = self.getRecord('CFG_ATTR', 'ATTR_CODE', attribute)
         if attrRecord:
             return attrRecord, f'Attribute "{attribute}" already exists!'
-        return None, f'Attribute "{attribute}" does not exist!'
+        return None, f'Attribute "{attribute}" not found!'
 
-    def required_parms(self, parm_dict, attr_list):
-        mlist = []
+    def lookupFragment(self, fragment):
+        erfragRecord = self.getRecord('CFG_ERFRAG', 'ERFRAG_CODE', fragment)
+        if erfragRecord:
+            return erfragRecord, f'Fragment "{fragment}" already exists!'
+        return None, f'Fragment "{fragment}" not found!'
+
+    def required_parms(self, parm_dict, attr_list, **kwargs):
+        test_type = kwargs.get('test_type', 'all').lower()
+        missing_list = []
         for attr in attr_list:
             if attr not in parm_dict:
-                mlist.append(attr)
-        if mlist:
-            raise ValueError(f"{', '.join(mlist)} {'is' if len(mlist) == 1 else 'are'} missing!")
+                missing_list.append(attr)
+        if test_type == 'all' and missing_list:
+            raise ValueError(f"{', '.join(missing_list)} {'is' if len(missing_list) == 1 else 'are'} missing!")
+        elif test_type == 'any' and len(missing_list) == len(attr_list):
+            raise ValueError(f"One of these attributes must be provided: {', '.join(attr_list)}")
+
+    def id_or_code_parm(self, arg_str, int_tag, str_tag, int_field, str_field):
+        if arg_str.startswith('{'):
+            json_parm = dictKeysUpper(json.loads(arg_str))
+        elif arg_str.isdigit():
+            json_parm = {int_tag: arg_str}
+        else:
+            json_parm = {str_tag: arg_str}
+
+        if json_parm.get(int_tag):
+            return int(json_parm.get(int_tag)), int_field
+        if json_parm.get(str_tag):
+            return json_parm.get(str_tag).upper(), str_field
+
+        raise ValueError(f"Either {int_tag} or {str_tag} must be provided")
+
+    def update_if_different(self, target_record, target_counter, target_field, attr_name, new_value):
+        if target_record[target_field] != new_value:
+            target_record[target_field] = new_value
+            colorize_msg(f"{attr_name} setting change detected", 'dim,italics')
+            return target_record, target_counter + 1
+        return target_record, target_counter
 
 
 # ===== data Source commands =====
@@ -1186,7 +1223,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of registered data sources
 
         Syntax:
-            listDataSources [optional_search_filter] [optional_output_format=table/json/jsonl]
+            listDataSources [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
         json_lines = []
@@ -1202,10 +1239,7 @@ class G2CmdShell(cmd.Cmd, object):
         Delete an existing data source
 
         Syntax:
-            deleteDataSource [dataSourceCode]
-
-        Examples:
-            deleteDataSource CUSTOMER
+            deleteDataSource [code or id]
 
         Caution:
             Deleting a data source does not delete its data and you will be prevented from saving if it has data loaded!
@@ -1214,20 +1248,18 @@ class G2CmdShell(cmd.Cmd, object):
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"DATASOURCE": arg}
-            self.required_parms(parmData, ['DATASOURCE'])
-            parmData['DATASOURCE'] = parmData['DATASOURCE'].upper()
+            searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'DATASOURCE', 'DSRC_ID', 'DSRC_CODE')
         except (ValueError, KeyError) as err:
             colorize_msg(f'Syntax error: {err}', 'error')
             return
 
-        if parmData['DATASOURCE'] == 'SEARCH':
-            colorize_msg('Cannot delete the SEARCH data source', 'error')
-            return
-
-        dsrcRecord, message = self.lookupDatasource(parmData['DATASOURCE'])
+        dsrcRecord = self.getRecord('CFG_DSRC', searchField, searchValue)
         if not dsrcRecord:
-            colorize_msg(message, 'warning')
+            colorize_msg('Data source not found!', 'warning')
+            return
+        if dsrcRecord['DSRC_ID'] <= 2:
+            colorize_msg(f"The {dsrcRecord['DSRC_CODE']} data source cannot be deleted!", 'error')
+            return
 
         self.cfgData['G2_CONFIG']['CFG_DSRC'].remove(dsrcRecord)
         colorize_msg(f'Successfully deleted!', 'success')
@@ -1235,6 +1267,65 @@ class G2CmdShell(cmd.Cmd, object):
 
 
 # ===== feature commands =====
+
+    def formatFeatureJson(self, ftypeRecord):
+
+        fclassRecord = self.getRecord('CFG_FCLASS', 'FCLASS_ID', ftypeRecord['FCLASS_ID'])
+
+        sfcallRecordList = self.getRecordList('CFG_SFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
+        efcallRecordList = self.getRecordList('CFG_EFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
+        cfcallRecordList = self.getRecordList('CFG_CFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
+        # while rare, there can be multiple comparison, the first one can be added with the feature,
+        #    the second must be added with addStandardizationCall, addExpressionCall, addComparisonCall
+        sfcallRecord = sorted(sfcallRecordList, key=lambda k: k['EXEC_ORDER'])[0] if sfcallRecordList else None
+        efcallRecord = sorted(efcallRecordList, key=lambda k: k['EXEC_ORDER'])[0] if efcallRecordList else None
+        cfcallRecord = sorted(cfcallRecordList, key=lambda k: k['EXEC_ORDER'])[0] if cfcallRecordList else None
+
+        sfuncRecord = self.getRecord('CFG_SFUNC', 'SFUNC_ID', sfcallRecord['SFUNC_ID']) if sfcallRecord else None
+        efuncRecord = self.getRecord('CFG_EFUNC', 'EFUNC_ID', efcallRecord['EFUNC_ID']) if efcallRecord else None
+        cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_ID', cfcallRecord['CFUNC_ID']) if cfcallRecord else None
+
+        jsonString = '{'
+        jsonString += '"id": %s' % ftypeRecord['FTYPE_ID']
+        jsonString += ', "feature": "%s"' % ftypeRecord['FTYPE_CODE']
+        jsonString += ', "class": "%s"' % fclassRecord['FCLASS_CODE'] if fclassRecord else 'OTHER'
+        jsonString += ', "behavior": "%s"' % getFeatureBehavior(ftypeRecord)
+        jsonString += ', "anonymize": "%s"' % ('Yes' if ftypeRecord['ANONYMIZE'].upper() == 'YES' else 'No')
+        jsonString += ', "candidates": "%s"' % ('Yes' if ftypeRecord['USED_FOR_CAND'].upper() == 'YES' else 'No')
+        jsonString += ', "standardize": "%s"' % (sfuncRecord['SFUNC_CODE'] if sfuncRecord else '')
+        jsonString += ', "expression": "%s"' % (efuncRecord['EFUNC_CODE'] if efuncRecord else '')
+        jsonString += ', "comparison": "%s"' % (cfuncRecord['CFUNC_CODE'] if cfuncRecord else '')
+        jsonString += ', "matchKey": "%s"' % ftypeRecord['SHOW_IN_MATCH_KEY']
+        jsonString += ', "derived": "%s"' % ftypeRecord['DERIVED']
+        jsonString += ', "rtypeID": "%s"' % ftypeRecord['RTYPE_ID']
+        jsonString += ', "version": "%s"' % ftypeRecord['VERSION']
+
+        elementList = []
+        fbomRecordList = self.getRecordList('CFG_FBOM', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
+        for fbomRecord in fbomRecordList:
+            felemRecord = self.getRecord('CFG_FELEM', 'FELEM_ID', fbomRecord['FELEM_ID'])
+            if not felemRecord:
+                elementList.append('ERROR: FELEM_ID %s' % fbomRecord['FELEM_ID'])
+                break
+            else:
+                if efcallRecord or cfcallRecord:
+                    efbomRecord = efcallRecord and self.getRecord('CFG_EFBOM', ['EFCALL_ID', 'FTYPE_ID','FELEM_ID'],
+                        [efcallRecord['EFCALL_ID'], fbomRecord['FTYPE_ID'],fbomRecord['FELEM_ID']])
+                    cfbomRecord = cfcallRecord and self.getRecord('CFG_CFBOM', ['CFCALL_ID', 'FTYPE_ID', 'FELEM_ID'],
+                        [cfcallRecord['CFCALL_ID'],fbomRecord['FTYPE_ID'],fbomRecord['FELEM_ID']])
+                    elementRecord = {}
+                    elementRecord['element'] = felemRecord['FELEM_CODE']
+                    elementRecord['expressed'] = 'No' if not efcallRecord or not efbomRecord else 'Yes'
+                    elementRecord['compared'] = 'No' if not cfcallRecord or not cfbomRecord else 'Yes'
+                    elementRecord['display'] = 'No' if fbomRecord['DISPLAY_LEVEL'] == 0 else 'Yes'
+                    elementList.append(elementRecord)
+                else:
+                    elementList.append(felemRecord['FELEM_CODE'])
+
+        jsonString += ', "elementList": %s' % json.dumps(elementList)
+        jsonString += '}'
+
+        return json.loads(jsonString)
 
     def do_addFeature(self, arg):
         """
@@ -1375,7 +1466,7 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['PERSIST_HISTORY'] = parmData.get('HISTORY', 'Yes')
         newRecord['DERIVATION'] = parmData.get('DERIVATION')
         newRecord['VERSION'] = parmData.get('VERSION', 1)
-        newRecord['RTYPE_ID'] = parmData.get('RTYPE_ID', 0)
+        newRecord['RTYPE_ID'] = parmData.get('RTYPEID', 0)
 
         self.cfgData['G2_CONFIG']['CFG_FTYPE'].append(newRecord)
         if self.doDebug:
@@ -1524,119 +1615,115 @@ class G2CmdShell(cmd.Cmd, object):
 
     def do_setFeature(self, arg):
         """
-        Sets configuration parameters for an exiting feature
+        Sets configuration parameters for an existing feature
 
         Syntax:
             setFeature [partial_json_configuration]
 
         Examples:
             setFeature {"feature": "NAME", "candidates": "Yes"}
-            setFeature {"feature": "MEDICARE_PROVIDER_ID", "behavior": "F1E"}
-
-        Notes:
-            You must at least specify the "feature" you want to edit.  Then you can change the following settings
-                - candidates
-                - behavior
-                - anonymize
 
         Caution:
-            Changing anything else requires a delete and re-add of the feature.
+            - The ID cannot be changed here. You must delete and re-add instead.
+            - Standardization, expression and comparison routines cannot be set here.
+              Use their specific add and delete call commands to adjust them.
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"FEATURE": arg}
+            parmData = dictKeysUpper(json.loads(arg))
             self.required_parms(parmData, ['FEATURE'])
             parmData['FEATURE'] = parmData['FEATURE'].upper()
         except (ValueError, KeyError) as err:
             colorize_msg(f'Syntax error: {err}', 'error')
             return
 
-        # lookup feature and error if doesn't exist
         old_ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
         if not old_ftypeRecord:
             colorize_msg(message, 'warning')
             return
 
-        ftypeRecord = old_ftypeRecord
+        # must use dict to create a new instance
+        ftypeRecord = dict(old_ftypeRecord)
 
-        # make the updates
+        update_cnt = 0
         error_cnt = 0
         for parmCode in parmData:
             if parmCode == 'FEATURE':
                 continue
 
-            elif parmCode == 'CANDIDATES' and parmData['CANDIDATES']:
+            elif parmCode == 'CANDIDATES':
                 parmData['CANDIDATES'], message = self.validateDomain('Candidates', parmData.get('CANDIDATES', 'No'), ['Yes', 'No'])
                 if not parmData['CANDIDATES']:
                     colorize_msg(message, 'error')
                     error_cnt += 1
                 else:
-                    ftypeRecord['USED_FOR_CAND'] = parmData['CANDIDATES']
+                    ftypeRecord, update_cnt = self.update_if_different(ftypeRecord, update_cnt, 'USED_FOR_CAND', 'candidates', parmData['CANDIDATES'])
 
-            elif parmCode == 'ANONYMIZE' and parmData['ANONYMIZE']:
+            elif parmCode == 'ANONYMIZE':
                 parmData['ANONYMIZE'], message = self.validateDomain('Anonymize', parmData.get('ANONYMIZE', 'No'), ['Yes', 'No'])
                 if not parmData['ANONYMIZE']:
                     colorize_msg(message, 'error')
                     error_cnt += 1
                 else:
-                    ftypeRecord['ANONYMIZE'] = parmData['ANONYMIZE']
+                    ftypeRecord, update_cnt = self.update_if_different(ftypeRecord, update_cnt, 'ANONYMIZE', 'anonymize', parmData['ANONYMIZE'])
 
-            elif parmCode == 'DERIVED' and parmData['DERIVED']:
+            elif parmCode == 'DERIVED':
                 parmData['DERIVED'], message = self.validateDomain('Derived', parmData.get('DERIVED', 'No'), ['Yes', 'No'])
                 if not parmData['DERIVED']:
                     colorize_msg(message, 'error')
                     error_cnt += 1
                 else:
-                    ftypeRecord['DERIVED'] = parmData['DERIVED']
+                    ftypeRecord, update_cnt = self.update_if_different(ftypeRecord, update_cnt, 'DERIVED', 'derived', parmData['DERIVED'])
 
-            elif parmCode == 'HISTORY' and parmData['HISTORY']:
+            elif parmCode == 'HISTORY':
                 parmData['HISTORY'], message = self.validateDomain('History', parmData.get('HISTORY', 'Yes'), ['Yes', 'No'])
                 if not parmData['HISTORY']:
                     colorize_msg(message, 'error')
                     error_cnt += 1
                 else:
-                    ftypeRecord['HISTORY'] = parmData['HISTORY']
+                    ftypeRecord, update_cnt = self.update_if_different(ftypeRecord, update_cnt, 'HISTORY', 'history', parmData['HISTORY'])
 
-            elif parmCode == 'MATCHKEY'and parmData['MATCHKEY']:
+            elif parmCode == 'MATCHKEY':
                 matchKeyDefault = 'Yes' if parmData.get('COMPARISON') else 'No'
                 parmData['MATCHKEY'], message = self.validateDomain('MatchKey', parmData.get('MATCHKEY', matchKeyDefault), ['Yes', 'No', 'Confirm', 'Denial'])
                 if not parmData['MATCHKEY']:
                     colorize_msg(message, 'error')
                     error_cnt += 1
                 else:
-                    ftypeRecord['MATCHKEY'] = parmData['MATCHKEY']
+                    ftypeRecord, update_cnt = self.update_if_different(ftypeRecord, update_cnt, 'SHOW_IN_MATCH_KEY', 'matchKey', parmData['MATCHKEY'])
 
-            elif parmCode == 'BEHAVIOR' and parmData['BEHAVIOR']:
+            elif parmCode == 'BEHAVIOR':
                 behaviorData, message = self.lookupBehaviorCode(parmData['BEHAVIOR'])
                 if not behaviorData:
                     colorize_msg(message, 'error')
                     error_cnt += 1
                 else:
-                    #ftypeRecord['BEHAVIOR'] = parmData['BEHAVIOR']
-                    ftypeRecord['FTYPE_FREQ'] = behaviorData['FREQUENCY']
-                    ftypeRecord['FTYPE_EXCL'] = behaviorData['EXCLUSIVITY']
-                    ftypeRecord['FTYPE_STAB'] = behaviorData['STABILITY']
+                    ftypeRecord, update_cnt = self.update_if_different(ftypeRecord, update_cnt, 'FTYPE_FREQ', 'frequency', behaviorData['FREQUENCY'])
+                    ftypeRecord, update_cnt = self.update_if_different(ftypeRecord, update_cnt, 'FTYPE_EXCL', 'behavior', behaviorData['EXCLUSIVITY'])
+                    ftypeRecord, update_cnt = self.update_if_different(ftypeRecord, update_cnt, 'FTYPE_STAB', 'stability', behaviorData['STABILITY'])
 
-            elif parmCode == 'CLASS' and parmData['CLASS']:
+            elif parmCode == 'CLASS':
                 fclassRecord, message = self.lookupFeatureClass(parmData['CLASS'])
                 if not fclassRecord:
                     colorize_msg(message, 'error')
                     error_cnt += 1
                 else:
-                    ftypeRecord['FCLASS_ID'] = fclassRecord['FCLASS_ID']
+                    ftypeRecord, update_cnt = self.update_if_different(ftypeRecord, update_cnt, 'FCLASS_ID', 'class', fclassRecord['FCLASS_ID'])
 
-            elif parmCode == 'DERIVATION' and parmData['DERIVATION']:
-                ftypeRecord['DERIVATION'] = parmData['DERIVATION']
+            elif parmCode == 'DERIVATION':
+                ftypeRecord, update_cnt = self.update_if_different(ftypeRecord, update_cnt, 'DERIVATION', 'derivation', parmData['DERIVATION'])
 
-            elif parmCode == 'VERSION' and parmData['VERSION']:
-                ftypeRecord['VERSION'] = parmData['VERSION']
+            elif parmCode == 'VERSION':
+                ftypeRecord, update_cnt = self.update_if_different(ftypeRecord, update_cnt, 'VERSION', 'version', parmData['VERSION'])
 
-            elif parmCode == 'RTYPE_ID' and parmData['RTYPE_ID']:
-                ftypeRecord['RTYPE_ID'] = parmData['RTYPE_ID']
+            elif parmCode == 'RTYPEID':
+                ftypeRecord, update_cnt = self.update_if_different(ftypeRecord, update_cnt, 'RTYPE_ID', 'rtype_id', parmData['RTYPEID'])
 
-            # DISABLED as
+
+            # NOTE: Changing functions would require setting up a call record as well!
+
             # elif parmCode == 'STANDARDIZE' and parmData['STANDARDIZE']:
             #     sfuncRecord, message = self.lookupStandardizationFunction(parmData['STANDARDIZE'])
             #     if not sfuncRecord:
@@ -1666,79 +1753,29 @@ class G2CmdShell(cmd.Cmd, object):
             #         error_cnt += 1
             #     else:
             #         ftypeRecord['CFUNC_ID'] = cfuncRecord['CFUNC_ID']
+            elif parmCode == 'ID':
+                if parmData['ID'] != ftypeRecord['FTYPE_ID']:
+                    colorize_msg(f"Cannot change ID on features!", 'error')
+                    error_cnt += 1
             else:
-                colorize_msg(f"Cannot {'set' if parmData[parmCode] else 'unset'} on features!", 'warning')
-
+                colorize_msg(f"Cannot {'set' if parmData[parmCode] else 'unset'} {parmCode} on features!", 'error')
+                error_cnt += 1
         if error_cnt > 0:
-            colorize_msg(f'Errors encountered, feature not updated!', 'warning')
+            colorize_msg(f'Errors encountered, feature not updated!', 'error')
+        elif update_cnt < 1:
+            colorize_msg(f'No changes deted!', 'caution')
         else:
             self.cfgData['G2_CONFIG']['CFG_FTYPE'].remove(old_ftypeRecord)
             self.cfgData['G2_CONFIG']['CFG_FTYPE'].append(ftypeRecord)
             colorize_msg(f'Successfully updated!', 'success')
             self.configUpdated = True
 
-    def formatFeatureJson(self, ftypeRecord):
-
-        fclassRecord = self.getRecord('CFG_FCLASS', 'FCLASS_ID', ftypeRecord['FCLASS_ID'])
-
-        sfcallRecordList = self.getRecordList('CFG_SFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
-        efcallRecordList = self.getRecordList('CFG_EFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
-        cfcallRecordList = self.getRecordList('CFG_CFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
-        # while rare, there can be multiple comparison, the first one can be added with the feature,
-        #    the second must be added with addStandardizationCall, addExpressionCall, addComparisonCall
-        sfcallRecord = sorted(sfcallRecordList, key=lambda k: k['EXEC_ORDER'])[0] if sfcallRecordList else None
-        efcallRecord = sorted(efcallRecordList, key=lambda k: k['EXEC_ORDER'])[0] if efcallRecordList else None
-        cfcallRecord = sorted(cfcallRecordList, key=lambda k: k['EXEC_ORDER'])[0] if cfcallRecordList else None
-
-        sfuncRecord = self.getRecord('CFG_SFUNC', 'SFUNC_ID', sfcallRecord['SFUNC_ID']) if sfcallRecord else None
-        efuncRecord = self.getRecord('CFG_EFUNC', 'EFUNC_ID', efcallRecord['EFUNC_ID']) if efcallRecord else None
-        cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_ID', cfcallRecord['CFUNC_ID']) if cfcallRecord else None
-
-        jsonString = '{'
-        jsonString += '"id": %s' % ftypeRecord['FTYPE_ID']
-        jsonString += ', "feature": "%s"' % ftypeRecord['FTYPE_CODE']
-        jsonString += ', "class": "%s"' % fclassRecord['FCLASS_CODE'] if fclassRecord else 'OTHER'
-        jsonString += ', "behavior": "%s"' % getFeatureBehavior(ftypeRecord)
-        jsonString += ', "anonymize": "%s"' % ('Yes' if ftypeRecord['ANONYMIZE'].upper() == 'YES' else 'No')
-        jsonString += ', "candidates": "%s"' % ('Yes' if ftypeRecord['USED_FOR_CAND'].upper() == 'YES' else 'No')
-        jsonString += ', "standardize": "%s"' % (sfuncRecord['SFUNC_CODE'] if sfuncRecord else '')
-        jsonString += ', "expression": "%s"' % (efuncRecord['EFUNC_CODE'] if efuncRecord else '')
-        jsonString += ', "comparison": "%s"' % (cfuncRecord['CFUNC_CODE'] if cfuncRecord else '')
-        jsonString += ', "matchKey": "%s"' % ftypeRecord['SHOW_IN_MATCH_KEY']
-
-        elementList = []
-        fbomRecordList = self.getRecordList('CFG_FBOM', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
-        for fbomRecord in fbomRecordList:
-            felemRecord = self.getRecord('CFG_FELEM', 'FELEM_ID', fbomRecord['FELEM_ID'])
-            if not felemRecord:
-                elementList.append('ERROR: FELEM_ID %s' % fbomRecord['FELEM_ID'])
-                break
-            else:
-                if efcallRecord or cfcallRecord:
-                    efbomRecord = efcallRecord and self.getRecord('CFG_EFBOM', ['EFCALL_ID', 'FTYPE_ID','FELEM_ID'],
-                        [efcallRecord['EFCALL_ID'], fbomRecord['FTYPE_ID'],fbomRecord['FELEM_ID']])
-                    cfbomRecord = cfcallRecord and self.getRecord('CFG_CFBOM', ['CFCALL_ID', 'FTYPE_ID', 'FELEM_ID'],
-                        [cfcallRecord['CFCALL_ID'],fbomRecord['FTYPE_ID'],fbomRecord['FELEM_ID']])
-                    elementRecord = {}
-                    elementRecord['element'] = felemRecord['FELEM_CODE']
-                    elementRecord['expressed'] = 'No' if not efcallRecord or not efbomRecord else 'Yes'
-                    elementRecord['compared'] = 'No' if not cfcallRecord or not cfbomRecord else 'Yes'
-                    elementRecord['display'] = 'No' if fbomRecord['DISPLAY_LEVEL'] == 0 else 'Yes'
-                    elementList.append(elementRecord)
-                else:
-                    elementList.append(felemRecord['FELEM_CODE'])
-
-        jsonString += ', "elementList": %s' % json.dumps(elementList)
-        jsonString += '}'
-
-        return json.loads(jsonString)
-
     def do_listFeatures(self, arg):
         """
         Returns the list of registered features
 
         Syntax:
-            listFeatures [optional_search_filter] [optional_output_format=table/json/jsonl]
+            listFeatures [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
         json_lines = []
@@ -1755,38 +1792,30 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a specific feature's json configuration
 
         Syntax:
-            getFeature [feature] [optional_output_format=table/json/jsonl]
-
-        Example:
-            getFeature NAME json
+            getFeature [code or id] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"FEATURE": arg}
-            self.required_parms(parmData, ['FEATURE'])
-            parmData['FEATURE'] = parmData['FEATURE'].upper()
+            searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'FEATURE', 'FTYPE_ID', 'FTYPE_CODE')
         except (ValueError, KeyError) as err:
             colorize_msg(f'Syntax error: {err}', 'error')
             return
 
-        ftypeRecord, errorText = self.lookupFeature(parmData['FEATURE'])
+        ftypeRecord = self.getRecord('CFG_FTYPE', searchField, searchValue)
         if ftypeRecord:
             self.print_json_record(self.formatFeatureJson(ftypeRecord))
         else:
-            colorize_msg(errorText, 'error')
+            colorize_msg('Feature not found!', 'error')
 
     def do_deleteFeature(self, arg):
         """
         Deletes a feature and its attributes
 
         Syntax:
-            deleteFeature [feature]
-
-        Example:
-            deleteFeature PHONE
+            deleteFeature [code or id]
 
         Caution:
             Deleting a feature does not delete its data and you will be prevented from saving if it has data loaded!
@@ -1795,20 +1824,18 @@ class G2CmdShell(cmd.Cmd, object):
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"FEATURE": arg}
-            self.required_parms(parmData, ['FEATURE'])
-            parmData['FEATURE'] = parmData['FEATURE'].upper()
+            searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'FEATURE', 'FTYPE_ID', 'FTYPE_CODE')
         except (ValueError, KeyError) as err:
             colorize_msg(err, 'error')
             return
 
-        if parmData['FEATURE'] in self.lockedFeatureList:
-            colorize_msg(f"{parmData['FEATURE']} is a locked feature", 'error')
+        ftypeRecord = self.getRecord('CFG_FTYPE', searchField, searchValue)
+        if not ftypeRecord:
+            colorize_msg('Feature not found!', 'error')
             return
 
-        ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
-        if not ftypeRecord:
-            colorize_msg(message, 'warning')
+        if ftypeRecord['FTYPE_CODE'] in self.lockedFeatureList:
+            colorize_msg(f"The feature {ftypeRecord['FTYPE_CODE']} cannot be deleted!", 'error')
             return
 
         # also delete all supporting tables
@@ -1842,6 +1869,27 @@ class G2CmdShell(cmd.Cmd, object):
 
 
 # ===== attribute commands =====
+
+    def formatAttributeJson(self, attributeRecord):
+
+        if 'ADVANCED' not in attributeRecord:
+            attributeRecord['ADVANCED'] = 'No'
+        if 'INTERNAL' not in attributeRecord:
+            attributeRecord['INTERNAL'] = 'No'
+
+        jsonString = '{'
+        jsonString += '"id": "%s"' % attributeRecord['ATTR_ID']
+        jsonString += ', "attribute": "%s"' % attributeRecord['ATTR_CODE']
+        jsonString += ', "class": "%s"' % attributeRecord['ATTR_CLASS']
+        jsonString += ', "feature": "%s"' % attributeRecord['FTYPE_CODE']
+        jsonString += ', "element": "%s"' % attributeRecord['FELEM_CODE']
+        jsonString += ', "required": "%s"' % attributeRecord['FELEM_REQ'].title()
+        jsonString += ', "default": "%s"' % (attributeRecord['DEFAULT_VALUE'] if attributeRecord['DEFAULT_VALUE'] else "")
+        jsonString += ', "advanced": "%s"' % attributeRecord['ADVANCED']
+        jsonString += ', "internal": "%s"' % attributeRecord['INTERNAL']
+        jsonString += '}'
+
+        return json.loads(jsonString)
 
     def do_addAttribute(self, arg):
         """
@@ -1926,33 +1974,12 @@ class G2CmdShell(cmd.Cmd, object):
         if self.doDebug:
             debug(newRecord)
 
-    def formatAttributeJson(self, attributeRecord):
-
-        if 'ADVANCED' not in attributeRecord:
-            attributeRecord['ADVANCED'] = 'No'
-        if 'INTERNAL' not in attributeRecord:
-            attributeRecord['INTERNAL'] = 'No'
-
-        jsonString = '{'
-        jsonString += '"id": "%s"' % attributeRecord['ATTR_ID']
-        jsonString += ', "attribute": "%s"' % attributeRecord['ATTR_CODE']
-        jsonString += ', "class": "%s"' % attributeRecord['ATTR_CLASS']
-        jsonString += ', "feature": "%s"' % attributeRecord['FTYPE_CODE']
-        jsonString += ', "element": "%s"' % attributeRecord['FELEM_CODE']
-        jsonString += ', "required": "%s"' % attributeRecord['FELEM_REQ'].title()
-        jsonString += ', "default": "%s"' % (attributeRecord['DEFAULT_VALUE'] if attributeRecord['DEFAULT_VALUE'] else "")
-        jsonString += ', "advanced": "%s"' % attributeRecord['ADVANCED']
-        jsonString += ', "internal": "%s"' % attributeRecord['INTERNAL']
-        jsonString += '}'
-
-        return json.loads(jsonString)
-
     def do_listAttributes(self, arg):
         """
         Returns the list of registered attributes
 
         Syntax:
-            listAttributes [optional_search_filter] [optional_output_format=table/json/jsonl]
+            listAttributes [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
         json_lines = []
@@ -1968,7 +1995,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a specific attribute's json configuration
 
         Syntax:
-            getAttribute [attribute] [optional_output_format=table/json/jsonl]
+            getAttribute [attribute] [optional_output_format = table, json or jsonl]
 
         Example:
             getAttribute NAME_FULL json
@@ -2018,25 +2045,21 @@ class G2CmdShell(cmd.Cmd, object):
         Deletes an attribute
 
         Syntax:
-            deleteAttribute [attribute]
-
-        Example:
-            deleteAttribute PHONE_NUMBER
+            deleteAttribute [code or id]
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ATTRIBUTE": arg}
-            self.required_parms(parmData, ['ATTRIBUTE'])
-            parmData['ATTRIBUTE'] = parmData['ATTRIBUTE'].upper()
+            searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'ATTRIBUTE', 'ATTR_ID', 'ATTR_CODE')
         except (ValueError, KeyError) as err:
             colorize_msg(f'Syntax error: {err}', 'error')
             return
 
-        attrRecord, message = self.lookupAttribute(parmData['ATTRIBUTE'])
+        attrRecord = self.getRecord('CFG_ATTR', searchField, searchValue)
         if not attrRecord:
-            colorize_msg(message, 'warning')
+            colorize_msg('Attribute not found!', 'warning')
+            return
 
         self.cfgData['G2_CONFIG']['CFG_ATTR'].remove(attrRecord)
         colorize_msg(f'Successfully deleted!', 'success')
@@ -2224,6 +2247,31 @@ class G2CmdShell(cmd.Cmd, object):
 
 # ===== standardization call commands =====
 
+    def formatStandardizationCallJson(self, sfcallRecord):
+        sfcallID = sfcallRecord['SFCALL_ID']
+
+        ftypeRecord1 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', sfcallRecord['FTYPE_ID'])
+        felemRecord1 = self.getRecord('CFG_FELEM', 'FELEM_ID', sfcallRecord['FELEM_ID'])
+        sfuncRecord = self.getRecord('CFG_SFUNC', 'SFUNC_ID', sfcallRecord['SFUNC_ID'])
+
+        sfcallData = {}
+        sfcallData['id'] = sfcallID
+
+        if ftypeRecord1:
+            sfcallData['feature'] = ftypeRecord1['FTYPE_CODE']
+        else:
+            sfcallData['feature'] = 'all'
+
+        if felemRecord1:
+            sfcallData['element'] = felemRecord1['FELEM_CODE']
+        else:
+            sfcallData['element'] = 'n/a'
+
+        sfcallData['execOrder'] = sfcallRecord['EXEC_ORDER']
+        sfcallData['function'] = sfuncRecord['SFUNC_CODE']
+
+        return sfcallData
+
     def do_addStandardizationCall(self, arg):
         """
         Add a new standardization call
@@ -2296,37 +2344,12 @@ class G2CmdShell(cmd.Cmd, object):
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
 
-    def formatStandardizationCallJson(self, sfcallRecord):
-        sfcallID = sfcallRecord['SFCALL_ID']
-
-        ftypeRecord1 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', sfcallRecord['FTYPE_ID'])
-        felemRecord1 = self.getRecord('CFG_FELEM', 'FELEM_ID', sfcallRecord['FELEM_ID'])
-        sfuncRecord = self.getRecord('CFG_SFUNC', 'SFUNC_ID', sfcallRecord['SFUNC_ID'])
-
-        sfcallData = {}
-        sfcallData['id'] = sfcallID
-
-        if ftypeRecord1:
-            sfcallData['feature'] = ftypeRecord1['FTYPE_CODE']
-        else:
-            sfcallData['feature'] = 'all'
-
-        if felemRecord1:
-            sfcallData['element'] = felemRecord1['FELEM_CODE']
-        else:
-            sfcallData['element'] = 'n/a'
-
-        sfcallData['execOrder'] = sfcallRecord['EXEC_ORDER']
-        sfcallData['function'] = sfuncRecord['SFUNC_CODE']
-
-        return sfcallData
-
     def do_listStandardizationCalls(self, arg):
         """
         Returns the list of standardization calls.
 
         Syntax:
-            listStandardizationCalls [optional_search_filter] [optional_output_format=table/json/jsonl]
+            listStandardizationCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
 
@@ -2344,7 +2367,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single standarization call
 
         Syntax:
-            getStandardizationCall [id] [optional_output_format=table/json/jsonl]
+            getStandardizationCall [id] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
         if not arg:
@@ -2392,6 +2415,57 @@ class G2CmdShell(cmd.Cmd, object):
         self.configUpdated = True
 
 # ===== expression call commands =====
+
+    def formatExpressionCallJson(self, efcallRecord):
+        efcallID = efcallRecord['EFCALL_ID']
+
+        ftypeRecord1 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', efcallRecord['FTYPE_ID'])
+        felemRecord1 = self.getRecord('CFG_FELEM', 'FELEM_ID', efcallRecord['FELEM_ID'])
+
+        efuncRecord = self.getRecord('CFG_EFUNC', 'EFUNC_ID', efcallRecord['EFUNC_ID'])
+        efcallData = {}
+        efcallData['id'] = efcallID
+
+        if ftypeRecord1:
+            efcallData['feature'] = ftypeRecord1['FTYPE_CODE']
+        else:
+            efcallData['feature'] = 'all'
+
+        if felemRecord1:
+            efcallData['element'] = felemRecord1['FELEM_CODE']
+        else:
+            efcallData['element'] = 'n/a'
+
+        efcallData['execOrder'] = efcallRecord['EXEC_ORDER']
+        efcallData['function'] = efuncRecord['EFUNC_CODE']
+        efcallData['isVirtual'] = efcallRecord['IS_VIRTUAL']
+
+        ftypeRecord2 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', efcallRecord['EFEAT_FTYPE_ID'])
+        if ftypeRecord2:
+            efcallData['expressionFeature'] = ftypeRecord2['FTYPE_CODE']
+        else:
+            efcallData['expressionFeature'] = 'n/a'
+
+        efbomList = []
+        for efbomRecord in sorted(self.getRecordList('CFG_EFBOM', 'EFCALL_ID', efcallID), key=lambda k: k['EXEC_ORDER']):
+            ftypeRecord3 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', efbomRecord['FTYPE_ID'])
+            felemRecord3 = self.getRecord('CFG_FELEM', 'FELEM_ID', efbomRecord['FELEM_ID'])
+
+            efbomData = {}
+            efbomData['order'] = efbomRecord['EXEC_ORDER']
+            if efbomRecord['FTYPE_ID'] <= 0:
+                efbomData['feature'] = 'parent'
+            elif ftypeRecord3:
+                efbomData['feature'] = ftypeRecord3['FTYPE_CODE']
+            if felemRecord3:
+                efbomData['element'] = felemRecord3['FELEM_CODE']
+            else:
+                efbomData['element'] = str(efbomRecord['FELEM_ID'])
+            efbomData['required'] = efbomRecord['FELEM_REQ']
+            efbomList.append(efbomData)
+        efcallData['elementList'] = efbomList
+
+        return efcallData
 
     def do_addExpressionCall(self, arg):
         """
@@ -2535,63 +2609,12 @@ class G2CmdShell(cmd.Cmd, object):
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
 
-    def formatExpressionCallJson(self, efcallRecord):
-        efcallID = efcallRecord['EFCALL_ID']
-
-        ftypeRecord1 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', efcallRecord['FTYPE_ID'])
-        felemRecord1 = self.getRecord('CFG_FELEM', 'FELEM_ID', efcallRecord['FELEM_ID'])
-
-        efuncRecord = self.getRecord('CFG_EFUNC', 'EFUNC_ID', efcallRecord['EFUNC_ID'])
-        efcallData = {}
-        efcallData['id'] = efcallID
-
-        if ftypeRecord1:
-            efcallData['feature'] = ftypeRecord1['FTYPE_CODE']
-        else:
-            efcallData['feature'] = 'all'
-
-        if felemRecord1:
-            efcallData['element'] = felemRecord1['FELEM_CODE']
-        else:
-            efcallData['element'] = 'n/a'
-
-        efcallData['execOrder'] = efcallRecord['EXEC_ORDER']
-        efcallData['function'] = efuncRecord['EFUNC_CODE']
-        efcallData['isVirtual'] = efcallRecord['IS_VIRTUAL']
-
-        ftypeRecord2 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', efcallRecord['EFEAT_FTYPE_ID'])
-        if ftypeRecord2:
-            efcallData['expressionFeature'] = ftypeRecord2['FTYPE_CODE']
-        else:
-            efcallData['expressionFeature'] = 'n/a'
-
-        efbomList = []
-        for efbomRecord in sorted(self.getRecordList('CFG_EFBOM', 'EFCALL_ID', efcallID), key=lambda k: k['EXEC_ORDER']):
-            ftypeRecord3 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', efbomRecord['FTYPE_ID'])
-            felemRecord3 = self.getRecord('CFG_FELEM', 'FELEM_ID', efbomRecord['FELEM_ID'])
-
-            efbomData = {}
-            efbomData['order'] = efbomRecord['EXEC_ORDER']
-            if efbomRecord['FTYPE_ID'] <= 0:
-                efbomData['feature'] = 'parent'
-            elif ftypeRecord3:
-                efbomData['feature'] = ftypeRecord3['FTYPE_CODE']
-            if felemRecord3:
-                efbomData['element'] = felemRecord3['FELEM_CODE']
-            else:
-                efbomData['element'] = str(efbomRecord['FELEM_ID'])
-            efbomData['required'] = efbomRecord['FELEM_REQ']
-            efbomList.append(efbomData)
-        efcallData['elementList'] = efbomList
-
-        return efcallData
-
     def do_listExpressionCalls(self, arg):
         """
         Returns the list of expression calls
 
         Syntax:
-            listExpressionCalls [optional_search_filter] [optional_output_format=table/json/jsonl]
+            listExpressionCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
 
@@ -2609,7 +2632,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single expression call
 
         Syntax:
-            getExpressionCall [id] [optional_output_format=table/json/jsonl]
+            getExpressionCall [id] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
         if not arg:
@@ -2804,6 +2827,29 @@ class G2CmdShell(cmd.Cmd, object):
 
 # ===== comparison call commands =====
 
+    def formatComparisonCallJson(self, cfcallRecord):
+        cfcallID = cfcallRecord['CFCALL_ID']
+        ftypeRecord1 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', cfcallRecord['FTYPE_ID'])
+        cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_ID', cfcallRecord['CFUNC_ID'])
+
+        cfcallData = {}
+        cfcallData['id'] = cfcallID
+        cfcallData['feature'] = ftypeRecord1['FTYPE_CODE'] if ftypeRecord1 else 'error'
+        #cfcallData['execOrder'] = cfcallRecord['EXEC_ORDER']
+        cfcallData['function'] = cfuncRecord['CFUNC_CODE'] if cfuncRecord else 'error'
+
+        cfbomList = []
+        for cfbomRecord in sorted(self.getRecordList('CFG_CFBOM', 'CFCALL_ID', cfcallID), key=lambda k: k['EXEC_ORDER']):
+            ftypeRecord3 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', cfbomRecord['FTYPE_ID'])
+            felemRecord3 = self.getRecord('CFG_FELEM', 'FELEM_ID', cfbomRecord['FELEM_ID'])
+            cfbomData = {}
+            cfbomData['order'] = cfbomRecord['EXEC_ORDER']
+            cfbomData['element'] = felemRecord3['FELEM_CODE'] if felemRecord3 else 'error'
+            cfbomList.append(cfbomData)
+        cfcallData['elementList'] = cfbomList
+
+        return cfcallData
+
     def do_addComparisonCall(self, arg):
         """
         Add a new comparison call
@@ -2895,35 +2941,12 @@ class G2CmdShell(cmd.Cmd, object):
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
 
-    def formatComparisonCallJson(self, cfcallRecord):
-        cfcallID = cfcallRecord['CFCALL_ID']
-        ftypeRecord1 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', cfcallRecord['FTYPE_ID'])
-        cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_ID', cfcallRecord['CFUNC_ID'])
-
-        cfcallData = {}
-        cfcallData['id'] = cfcallID
-        cfcallData['feature'] = ftypeRecord1['FTYPE_CODE'] if ftypeRecord1 else 'error'
-        #cfcallData['execOrder'] = cfcallRecord['EXEC_ORDER']
-        cfcallData['function'] = cfuncRecord['CFUNC_CODE'] if cfuncRecord else 'error'
-
-        cfbomList = []
-        for cfbomRecord in sorted(self.getRecordList('CFG_CFBOM', 'CFCALL_ID', cfcallID), key=lambda k: k['EXEC_ORDER']):
-            ftypeRecord3 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', cfbomRecord['FTYPE_ID'])
-            felemRecord3 = self.getRecord('CFG_FELEM', 'FELEM_ID', cfbomRecord['FELEM_ID'])
-            cfbomData = {}
-            cfbomData['order'] = cfbomRecord['EXEC_ORDER']
-            cfbomData['element'] = felemRecord3['FELEM_CODE'] if felemRecord3 else 'error'
-            cfbomList.append(cfbomData)
-        cfcallData['elementList'] = cfbomList
-
-        return cfcallData
-
     def do_listComparisonCalls(self, arg):
         """
         Returns the list of comparison calls
 
         Syntax:
-            listComparisonCalls [optional_search_filter] [optional_output_format=table/json/jsonl]
+            listComparisonCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
 
@@ -2941,7 +2964,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single comparison call
 
         Syntax:
-            getComparisonCall [id] [optional_output_format=table/json/jsonl]
+            getComparisonCall [id] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
         if not arg:
@@ -2992,6 +3015,29 @@ class G2CmdShell(cmd.Cmd, object):
 
 
 # ===== distinctness call commands =====
+
+    def formatDistinctnessCallJson(self, dfcallRecord):
+        dfcallID = dfcallRecord['DFCALL_ID']
+        ftypeRecord1 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', dfcallRecord['FTYPE_ID'])
+        dfuncRecord = self.getRecord('CFG_DFUNC', 'DFUNC_ID', dfcallRecord['DFUNC_ID'])
+
+        dfcallData = {}
+        dfcallData['id'] = dfcallID
+        dfcallData['feature'] = ftypeRecord1['FTYPE_CODE'] if ftypeRecord1 else 'error'
+        #dfcallData['execOrder'] = dfcallRecord['EXEC_ORDER']
+        dfcallData['function'] = dfuncRecord['DFUNC_CODE'] if dfuncRecord else 'error'
+
+        dfbomList = []
+        for dfbomRecord in sorted(self.getRecordList('CFG_DFBOM', 'DFCALL_ID', dfcallID), key=lambda k: k['EXEC_ORDER']):
+            ftypeRecord3 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', dfbomRecord['FTYPE_ID'])
+            felemRecord3 = self.getRecord('CFG_FELEM', 'FELEM_ID', dfbomRecord['FELEM_ID'])
+            cfbomData = {}
+            cfbomData['order'] = dfbomRecord['EXEC_ORDER']
+            cfbomData['element'] = felemRecord3['FELEM_CODE'] if felemRecord3 else 'error'
+            dfbomList.append(cfbomData)
+        dfcallData['elementList'] = dfbomList
+
+        return dfcallData
 
     def do_addDistinctnessCall(self, arg):
         """
@@ -3085,35 +3131,12 @@ class G2CmdShell(cmd.Cmd, object):
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
 
-    def formatDistinctnessCallJson(self, dfcallRecord):
-        dfcallID = dfcallRecord['DFCALL_ID']
-        ftypeRecord1 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', dfcallRecord['FTYPE_ID'])
-        dfuncRecord = self.getRecord('CFG_DFUNC', 'DFUNC_ID', dfcallRecord['DFUNC_ID'])
-
-        dfcallData = {}
-        dfcallData['id'] = dfcallID
-        dfcallData['feature'] = ftypeRecord1['FTYPE_CODE'] if ftypeRecord1 else 'error'
-        #dfcallData['execOrder'] = dfcallRecord['EXEC_ORDER']
-        dfcallData['function'] = dfuncRecord['DFUNC_CODE'] if dfuncRecord else 'error'
-
-        dfbomList = []
-        for dfbomRecord in sorted(self.getRecordList('CFG_DFBOM', 'DFCALL_ID', dfcallID), key=lambda k: k['EXEC_ORDER']):
-            ftypeRecord3 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', dfbomRecord['FTYPE_ID'])
-            felemRecord3 = self.getRecord('CFG_FELEM', 'FELEM_ID', dfbomRecord['FELEM_ID'])
-            cfbomData = {}
-            cfbomData['order'] = dfbomRecord['EXEC_ORDER']
-            cfbomData['element'] = felemRecord3['FELEM_CODE'] if felemRecord3 else 'error'
-            dfbomList.append(cfbomData)
-        dfcallData['elementList'] = dfbomList
-
-        return dfcallData
-
     def do_listDistinctnessCalls(self, arg):
         """
         Returns the list of distinctness calls
 
         Syntax:
-            listDistinctnessCalls [optional_search_filter] [optional_output_format=table/json/jsonl]
+            listDistinctnessCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
 
@@ -3131,7 +3154,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single distinctness call
 
         Syntax:
-            getDistinctnessCall [id] [optional_output_format=table/json/jsonl]
+            getDistinctnessCall [id] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
         if not arg:
@@ -3188,7 +3211,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of internal reference codes
 
         Syntax:
-            listReferenceCodes [optional_code_type] [optional_output_format=table/json/jsonl]
+            listReferenceCodes [optional_code_type] [optional_output_format = table, json or jsonl]
 
         Notes:
             reference code types include:
@@ -3249,125 +3272,7 @@ class G2CmdShell(cmd.Cmd, object):
                 json_lines.append({"attributeClass": attrClass})
             self.print_json_lines(json_lines, 'Attribute Classes')
 
-    def do_listStandardizationFunctions(self, arg):
-        """
-        Returns the list of standardization functions
-
-        Syntax:
-            listStandardizeFunctions [optional_search_filter] [optional_output_format=table/json/jsonl]
-        """
-        arg = self.check_arg_for_output_format(arg)
-        json_lines = []
-        for funcRecord in sorted(self.getRecordList('CFG_SFUNC'), key=lambda k: k['SFUNC_ID']):
-            if arg and arg.lower() not in str(funcRecord).lower():
-                continue
-            json_lines.append({"id": funcRecord["SFUNC_ID"], "function": funcRecord["SFUNC_CODE"], \
-                "connectStr": funcRecord["CONNECT_STR"],\
-                "language": funcRecord["LANGUAGE"],\
-                "javaClassName": funcRecord["JAVA_CLASS_NAME"]})
-
-        if json_lines:
-            self.print_json_lines(json_lines)
-
-    def do_listExpressionFunctions(self, arg):
-        """
-        Returns the list of expression functions
-
-        Syntax:
-            listExpressionFuncstions [optional_search_filter] [optional_output_format=table/json/jsonl]
-        """
-        arg = self.check_arg_for_output_format(arg)
-        json_lines = []
-        for funcRecord in sorted(self.getRecordList('CFG_EFUNC'), key=lambda k: k['EFUNC_ID']):
-            if arg and arg.lower() not in str(funcRecord).lower():
-                continue
-            json_lines.append({"id": funcRecord["EFUNC_ID"], "function": funcRecord["EFUNC_CODE"], \
-                "version": funcRecord["FUNC_VER"],\
-                "connectStr": funcRecord["CONNECT_STR"],\
-                "language": funcRecord["LANGUAGE"],\
-                "javaClassName": funcRecord["JAVA_CLASS_NAME"]})
-
-        if json_lines:
-            self.print_json_lines(json_lines)
-
-        return
-
-    def do_listComparisonFunctions(self, arg):
-        """
-        Returns the list of comparison functions
-
-        Syntax:
-            listComparisonFunctions [optional_search_filter] [optional_output_format=table/json/jsonl]
-        """
-        arg = self.check_arg_for_output_format(arg)
-        json_lines = []
-        for funcRecord in sorted(self.getRecordList('CFG_CFUNC'), key=lambda k: k['CFUNC_ID']):
-            if arg and arg.lower() not in str(funcRecord).lower():
-                continue
-            json_lines.append({"id": funcRecord["CFUNC_ID"], "function": funcRecord["CFUNC_CODE"], \
-                "connectStr": funcRecord["CONNECT_STR"],\
-                "anonSupport": funcRecord["ANON_SUPPORT"],\
-                "language": funcRecord["LANGUAGE"],\
-                "javaClassName": funcRecord["JAVA_CLASS_NAME"]})
-        if json_lines:
-            self.print_json_lines(json_lines)
-
-        return
-
-    def do_listComparisonThresholds(self, arg):
-        """
-        Returns the list of thresholds by comparison function return value
-
-        Syntax:
-            listComparisonThresholds [optional_search_filter] [optional_output_format=table/json/jsonl]
-        """
-        arg = self.check_arg_for_output_format(arg)
-        json_lines = []
-        for funcRecord in sorted(self.getRecordList('CFG_CFUNC'), key=lambda k: k['CFUNC_ID']):
-            if arg and arg.lower() not in str(funcRecord).lower():
-                continue
-            for cfrtnRecord in sorted(self.getRecordList('CFG_CFRTN', 'CFUNC_ID', funcRecord['CFUNC_ID']),
-                                      key=lambda k: (k['CFUNC_ID'], k['FTYPE_ID'], k['CFRTN_ID'])):
-
-                if cfrtnRecord.get("FTYPE_ID", 0) != 0:
-                    ftypeCode = self.getRecord("CFG_FTYPE", "FTYPE_ID", cfrtnRecord["FTYPE_ID"])["FTYPE_CODE"]
-                else:
-                    ftypeCode = 'all'
-
-                json_lines.append({"id": cfrtnRecord["CFRTN_ID"],
-                                   "function": funcRecord["CFUNC_CODE"],
-                                   "execOrder": cfrtnRecord["EXEC_ORDER"],
-                                   "scoreName": cfrtnRecord["CFUNC_RTNVAL"],
-                                   "feature": ftypeCode,
-                                   "sameScore": cfrtnRecord["SAME_SCORE"],
-                                   "closeScore": cfrtnRecord["CLOSE_SCORE"],
-                                   "likelyScore": cfrtnRecord["LIKELY_SCORE"],
-                                   "plausibleScore": cfrtnRecord["PLAUSIBLE_SCORE"],
-                                   "unlikelyScore": cfrtnRecord["UN_LIKELY_SCORE"]})
-        if json_lines:
-            self.print_json_lines(json_lines)
-        print()
-
-    def do_listDistinctnessFunctions(self, arg):
-        """
-        Returns the list of distinctness functions
-
-        Syntax:
-            listDistinctnessFunctions [optional_search_filter] [optional_output_format=table/json/jsonl]
-        """
-        arg = self.check_arg_for_output_format(arg)
-        json_lines = []
-        for funcRecord in sorted(self.getRecordList('CFG_DFUNC'), key=lambda k: k['DFUNC_ID']):
-            if arg and arg.lower() not in str(funcRecord).lower():
-                continue
-            json_lines.append({"id": funcRecord["DFUNC_ID"], "function": funcRecord["DFUNC_CODE"], \
-                "connectStr": funcRecord["CONNECT_STR"],\
-                "anonSupport": funcRecord["ANON_SUPPORT"],\
-                "language": funcRecord["LANGUAGE"],\
-                "javaClassName": funcRecord["JAVA_CLASS_NAME"]})
-
-        if json_lines:
-            self.print_json_lines(json_lines)
+    # standardization functions
 
     def do_addStandardizationFunction(self, arg):
         """
@@ -3377,7 +3282,7 @@ class G2CmdShell(cmd.Cmd, object):
             addStandardizationFunction {json_configuration}
 
         Examples:
-            see listStandardizationFunctions or examples of json_configurations
+            see listStandardizationFunctions for examples of json_configurations
 
         Caution:
             Added a new function requires a plugin to be programmed!
@@ -3424,6 +3329,28 @@ class G2CmdShell(cmd.Cmd, object):
         if self.doDebug:
             debug(newRecord)
 
+    def do_listStandardizationFunctions(self, arg):
+        """
+        Returns the list of standardization functions
+
+        Syntax:
+            listStandardizeFunctions [optional_search_filter] [optional_output_format = table, json or jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+        json_lines = []
+        for funcRecord in sorted(self.getRecordList('CFG_SFUNC'), key=lambda k: k['SFUNC_ID']):
+            if arg and arg.lower() not in str(funcRecord).lower():
+                continue
+            json_lines.append({"id": funcRecord["SFUNC_ID"], "function": funcRecord["SFUNC_CODE"], \
+                "connectStr": funcRecord["CONNECT_STR"],\
+                "language": funcRecord["LANGUAGE"],\
+                "javaClassName": funcRecord["JAVA_CLASS_NAME"]})
+
+        if json_lines:
+            self.print_json_lines(json_lines)
+
+    # expression functions
+
     def do_addExpressionFunction(self, arg):
         """
         Adds a new expression function
@@ -3432,7 +3359,7 @@ class G2CmdShell(cmd.Cmd, object):
             addExpressionFunction {json_configuration}
 
         Examples:
-            see listExpressionFunctions or examples of json_configurations
+            see listExpressionFunctions for examples of json_configurations
 
         Caution:
             Adding a new function requires a plugin to be programmed!
@@ -3481,6 +3408,31 @@ class G2CmdShell(cmd.Cmd, object):
         if self.doDebug:
             debug(newRecord)
 
+    def do_listExpressionFunctions(self, arg):
+        """
+        Returns the list of expression functions
+
+        Syntax:
+            listExpressionFuncstions [optional_search_filter] [optional_output_format = table, json or jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+        json_lines = []
+        for funcRecord in sorted(self.getRecordList('CFG_EFUNC'), key=lambda k: k['EFUNC_ID']):
+            if arg and arg.lower() not in str(funcRecord).lower():
+                continue
+            json_lines.append({"id": funcRecord["EFUNC_ID"], "function": funcRecord["EFUNC_CODE"], \
+                "version": funcRecord["FUNC_VER"],\
+                "connectStr": funcRecord["CONNECT_STR"],\
+                "language": funcRecord["LANGUAGE"],\
+                "javaClassName": funcRecord["JAVA_CLASS_NAME"]})
+
+        if json_lines:
+            self.print_json_lines(json_lines)
+
+        return
+
+    # comparison functions
+
     def do_addComparisonFunction(self, arg):
         """
         Adds a new comparison function
@@ -3489,7 +3441,7 @@ class G2CmdShell(cmd.Cmd, object):
             addComparisonFunction {json_configuration}
 
         Examples:
-            see listComparisonFunctions or examples of json_configurations
+            see listComparisonFunctions for examples of json_configurations
 
         Caution:
             Adding a new function requires a plugin to be programmed!
@@ -3537,6 +3489,28 @@ class G2CmdShell(cmd.Cmd, object):
         colorize_msg('Successfully added!', 'success')
         if self.doDebug:
             debug(newRecord)
+
+    def do_listComparisonFunctions(self, arg):
+        """
+        Returns the list of comparison functions
+
+        Syntax:
+            listComparisonFunctions [optional_search_filter] [optional_output_format = table, json or jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+        json_lines = []
+        for funcRecord in sorted(self.getRecordList('CFG_CFUNC'), key=lambda k: k['CFUNC_ID']):
+            if arg and arg.lower() not in str(funcRecord).lower():
+                continue
+            json_lines.append({"id": funcRecord["CFUNC_ID"], "function": funcRecord["CFUNC_CODE"], \
+                "connectStr": funcRecord["CONNECT_STR"],\
+                "anonSupport": funcRecord["ANON_SUPPORT"],\
+                "language": funcRecord["LANGUAGE"],\
+                "javaClassName": funcRecord["JAVA_CLASS_NAME"]})
+        if json_lines:
+            self.print_json_lines(json_lines)
+
+        return
 
     def do_addComparisonThreshold(self, arg):
         """
@@ -3616,6 +3590,40 @@ class G2CmdShell(cmd.Cmd, object):
         if self.doDebug:
             debug(newRecord)
 
+    def do_listComparisonThresholds(self, arg):
+        """
+        Returns the list of thresholds by comparison function return value
+
+        Syntax:
+            listComparisonThresholds [optional_search_filter] [optional_output_format = table, json or jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+        json_lines = []
+        for funcRecord in sorted(self.getRecordList('CFG_CFUNC'), key=lambda k: k['CFUNC_ID']):
+            if arg and arg.lower() not in str(funcRecord).lower():
+                continue
+            for cfrtnRecord in sorted(self.getRecordList('CFG_CFRTN', 'CFUNC_ID', funcRecord['CFUNC_ID']),
+                                      key=lambda k: (k['CFUNC_ID'], k['FTYPE_ID'], k['CFRTN_ID'])):
+
+                if cfrtnRecord.get("FTYPE_ID", 0) != 0:
+                    ftypeCode = self.getRecord("CFG_FTYPE", "FTYPE_ID", cfrtnRecord["FTYPE_ID"])["FTYPE_CODE"]
+                else:
+                    ftypeCode = 'all'
+
+                json_lines.append({"id": cfrtnRecord["CFRTN_ID"],
+                                   "function": funcRecord["CFUNC_CODE"],
+                                   "execOrder": cfrtnRecord["EXEC_ORDER"],
+                                   "scoreName": cfrtnRecord["CFUNC_RTNVAL"],
+                                   "feature": ftypeCode,
+                                   "sameScore": cfrtnRecord["SAME_SCORE"],
+                                   "closeScore": cfrtnRecord["CLOSE_SCORE"],
+                                   "likelyScore": cfrtnRecord["LIKELY_SCORE"],
+                                   "plausibleScore": cfrtnRecord["PLAUSIBLE_SCORE"],
+                                   "unlikelyScore": cfrtnRecord["UN_LIKELY_SCORE"]})
+        if json_lines:
+            self.print_json_lines(json_lines)
+        print()
+
     def do_deleteComparisonThreshold(self, arg):
         """
         Deletes a comparision threshold
@@ -3641,6 +3649,29 @@ class G2CmdShell(cmd.Cmd, object):
         colorize_msg(f'Successfully deleted!', 'success')
         self.configUpdated = True
 
+    # distinctness functions
+
+    def do_listDistinctnessFunctions(self, arg):
+        """
+        Returns the list of distinctness functions
+
+        Syntax:
+            listDistinctnessFunctions [optional_search_filter] [optional_output_format = table, json or jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+        json_lines = []
+        for funcRecord in sorted(self.getRecordList('CFG_DFUNC'), key=lambda k: k['DFUNC_ID']):
+            if arg and arg.lower() not in str(funcRecord).lower():
+                continue
+            json_lines.append({"id": funcRecord["DFUNC_ID"], "function": funcRecord["DFUNC_CODE"], \
+                "connectStr": funcRecord["CONNECT_STR"],\
+                "anonSupport": funcRecord["ANON_SUPPORT"],\
+                "language": funcRecord["LANGUAGE"],\
+                "javaClassName": funcRecord["JAVA_CLASS_NAME"]})
+
+        if json_lines:
+            self.print_json_lines(json_lines)
+
     def do_addDistinctnessFunction(self, arg):
         """
         Adds a new distinctness function
@@ -3649,7 +3680,7 @@ class G2CmdShell(cmd.Cmd, object):
             addDistinctnessFunction {json_configuration}
 
         Examples:
-            see listDistinctnessFunctions or examples of json_configurations
+            see listDistinctnessFunctions for examples of json_configurations
 
         Caution:
             Adding a new function requires a plugin to be programmed!
@@ -3698,160 +3729,640 @@ class G2CmdShell(cmd.Cmd, object):
         if self.doDebug:
             debug(newRecord)
 
+    # element functions
 
-# ===== element commands =====
-
-    def getElementJson(self, elementRecord):
-        jsonString = '{'
-        jsonString += '"id": "%s"' % elementRecord['FELEM_ID']
-        jsonString += ', "id": "%s"' % elementRecord['FELEM_CODE']
-        jsonString += ', "datatype": "%s"' % elementRecord['DATA_TYPE']
-        jsonString += ', "tokenize": "%s"' % elementRecord['TOKENIZE']
-        jsonString += '}'
-
-        return json.loads(jsonString)
-
-    def do_listElements(self, arg):
-        """
-        Returns the list of feature elements
-
-        Syntax:
-            listElements [optional_search_filter] [optional_output_format]
-        """
-        arg = self.check_arg_for_output_format(arg)
-        json_lines = []
-        for felemRecord in sorted(self.getRecordList('CFG_FELEM'), key=lambda k: k['FELEM_ID']):
-            if arg and arg.lower() not in str(felemRecord).lower():
-                continue
-            json_lines.append(self.getElementJson(felemRecord))
-        self.print_json_lines(json_lines)
-
-    def do_getElement(self, arg):
-        """\ngetElement [element_name]\n"""
-
-        arg = self.check_arg_for_output_format(arg)
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ELEMENT": arg}
-            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
-            return
-
-        felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
-        if not felemRecord:
-            colorize_msg('Element not found!', 'error')
-        else:
-            self.print_json_record(self.getElementJson(felemRecord))
+    def formatElementJson(self, elementRecord):
+        elementData = {"id": elementRecord['FELEM_ID'],
+                       "element": elementRecord['FELEM_CODE'],
+                       "datatype": elementRecord['DATA_TYPE'],
+                       "tokenize": elementRecord['TOKENIZE']}
+        return elementData
 
     def do_addElement(self, arg):
         """
-        \n\taddElement {"element": "<element_name>"}
-        \n\n\taddElement {"element": "<element_name>", "tokenize": "no", "datatype": "no"}
-        \n\n\tFor additional example structures, use getFeature or listFeatures\n
-        """
+        Adds a new element
 
+        Syntax:
+            addElement {json_configuration}
+
+        Examples:
+            see listElements for examples of json_configurations
+        """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
-
         try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ELEMENT": arg}
+            parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['ELEMENT'])
+            parmData['ID'] = int(parmData.get('ID', 0))
             parmData['ELEMENT'] = parmData['ELEMENT'].upper()
         except (ValueError, KeyError) as err:
             colorize_msg(f'Syntax error: {err}', 'error')
             return
 
         if self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT']):
-            colorize_msg('Element already exists!', 'error')
+            colorize_msg('Element already exists!', 'warning')
             return
-        else:
 
-            # default for missing values
-            if 'DATATYPE' not in parmData or len(parmData['DATATYPE'].strip()) == 0:
-                parmData['DATATYPE'] = 'string'
-            else:
-                if parmData['DATATYPE'].upper() not in ('DATE', 'DATETIME', 'JSON', 'NUMBER', 'STRING'):
-                    colorize_msg('dataType must be DATE, DATETIME, JSON, NUMBER, or STRING', 'error')
-                    return
-                parmData['DATATYPE'] = parmData['DATATYPE'].lower()
+        parmData['DATATYPE'], message = self.validateDomain('DataType', parmData.get('DATATYPE', 'string'), ['string', 'number', 'date', 'datetime', 'json'])
+        if not parmData['DATATYPE']:
+            colorize_msg(message, 'error')
+            return
 
-            if 'TOKENIZE' not in parmData or len(parmData['TOKENIZE'].strip()) == 0:
-                parmData['TOKENIZE'] = 'No'
-            else:
-                if parmData['TOKENIZE'] not in ('0', '1', 'No', 'Yes'):
-                    colorize_msg('tokenize value must be Yes or No', 'error')
-                    return
+        parmData['TOKENIZE'], message = self.validateDomain('Tokenize', parmData.get('TOKENIZE', 'No'), ['Yes', 'No'])
+        if not parmData['TOKENIZE']:
+            colorize_msg(message, 'error')
+            return
 
-            maxID = []
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_FELEM'])):
-                maxID.append(self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID'])
+        felemID = self.checkDesiredRecordID('CFG_FELEM', 'FELEM_ID', parmData.get('ID'))
+        if parmData.get('ID') and felemID != parmData['ID']:
+            colorize_msg('The specified ID is already taken! Remove it to assign the next available', 'error')
+            return
 
-            if 'ID' in parmData:
-                felemID = int(parmData['ID'])
-            else:
-                felemID = max(maxID) + 1 if max(maxID) >= 1000 else 1000
+        newRecord = {}
+        newRecord['FELEM_ID'] = felemID
+        newRecord['FELEM_CODE'] = parmData['ELEMENT']
+        newRecord['FELEM_DESC'] = parmData['ELEMENT']
+        newRecord['TOKENIZE'] = parmData['TOKENIZE']
+        newRecord['DATA_TYPE'] = parmData['DATATYPE']
+        self.cfgData['G2_CONFIG']['CFG_FELEM'].append(newRecord)
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+        if self.doDebug:
+            debug(newRecord)
 
-            newRecord = {}
-            newRecord['FELEM_ID'] = felemID
-            newRecord['FELEM_CODE'] = parmData['ELEMENT']
-            newRecord['FELEM_DESC'] = parmData['ELEMENT']
-            newRecord['TOKENIZE'] = parmData['TOKENIZE']
-            newRecord['DATA_TYPE'] = parmData['DATATYPE']
-            self.cfgData['G2_CONFIG']['CFG_FELEM'].append(newRecord)
-            self.configUpdated = True
-            colorize_msg('Successfully added!', 'success')
-            if self.doDebug:
-                debug(newRecord)
+    def do_listElements(self, arg):
+        """
+        Returns the list of elements.
+
+        Syntax:
+            listElements [optional_search_filter] [optional_output_format = table, json or jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+
+        json_lines = []
+        for elementRecord in sorted(self.getRecordList('CFG_FELEM'), key=lambda k: k['FELEM_CODE']):
+            elementJson = self.formatElementJson(elementRecord)
+            if arg and arg.lower() not in str(elementJson).lower():
+                continue
+            json_lines.append(elementJson)
+
+        self.print_json_lines(json_lines)
+
+    def do_getElement(self, arg):
+        """
+        Returns a single element
+
+        Syntax:
+            getElement [code or id] [optional_output_format = table, json or jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'ELEMENT', 'FELEM_ID', 'FELEM_CODE')
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        elementRecord = self.getRecord('CFG_FELEM', searchField, searchValue)
+        if not elementRecord:
+            colorize_msg(f"Element does not exist!", 'warning')
+            return
+        self.print_json_record(self.formatElementJson(elementRecord))
 
     def do_deleteElement(self, arg):
-        """\ndeleteElement {"feature": "<feature_name>", "element": "<element_name>"}\n"""
+        """
+        Deletes an element
+
+        Syntax:
+            deleteElement [code or id]
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'ELEMENT', 'FELEM_ID', 'FELEM_CODE')
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        elementRecord = self.getRecord('CFG_FELEM', searchField, searchValue)
+        if not elementRecord:
+            colorize_msg(f"Element does not exist!", 'warning')
+            return
+
+        self.cfgData['G2_CONFIG']['CFG_FELEM'].remove(elementRecord)
+        colorize_msg(f'Successfully deleted!', 'success')
+        self.configUpdated = True
+
+# ===== rules and fragments =====
+
+    def formatFragmentJson(self, record):
+        return {'id': record['ERFRAG_ID'],
+                'fragment': record['ERFRAG_CODE'],
+                'source': record['ERFRAG_SOURCE'],
+                'depends': record['ERFRAG_DEPENDS']}
+
+    def validateFragmentSource(self, sourceString):
+        # compute dependencies from source
+        # example: './FRAGMENT[./SAME_NAME>0 and ./SAME_STAB>0] or ./FRAGMENT[./SAME_NAME1>0 and ./SAME_STAB1>0]'
+        dependencyList = []
+        startPos = sourceString.find('FRAGMENT[')
+        while startPos > 0:
+            fragmentString = sourceString[startPos:sourceString.find(']', startPos) + 1]
+            sourceString = sourceString.replace(fragmentString, '')
+            # parse the fragment string
+            currentFrag = 'eof'
+            fragmentChars = list(fragmentString)
+            potentialErrorString = ''
+            for thisChar in fragmentChars:
+                potentialErrorString += thisChar
+                if thisChar == '/':
+                    currentFrag = ''
+                elif currentFrag != 'eof':
+                    if thisChar in '| =><)':
+                        # lookup the fragment code
+                        fragRecord = self.getRecord('CFG_ERFRAG', 'ERFRAG_CODE', currentFrag)
+                        if not fragRecord:
+                            return [], f"Invalid fragment reference: {currentFrag}"
+                        else:
+                            dependencyList.append(str(fragRecord['ERFRAG_ID']))
+                        currentFrag = 'eof'
+                    else:
+                        currentFrag += thisChar
+            # next list of fragments
+            startPos = sourceString.find('FRAGMENT[')
+        return dependencyList, ''
+
+    def do_addFragment(self, arg):
+        """
+        Adds a new rule fragment
+
+        Syntax:
+            addFragment {json_configuration}
+
+        Examples:
+            see listFragments for examples of json_configurations
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['FRAGMENT', 'SOURCE'])
+            parmData['ID'] = int(parmData.get('ID', 0))
+            parmData['FRAGMENT'] = parmData['FRAGMENT'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        if self.getRecord('CFG_ERFRAG', 'ERFRAG_CODE', parmData['FRAGMENT']):
+            colorize_msg('Fragment already exists!', 'warning')
+            return
+
+        erfragID = self.checkDesiredRecordID('CFG_ERFRAG', 'ERFRAG_ID', parmData.get('ID'))
+        if parmData.get('ID') and erfragID != parmData['ID']:
+            colorize_msg('The specified ID is already taken! Remove it to assign the next available', 'error')
+            return
+
+        dependencyList, error_message = self.validateFragmentSource(parmData['SOURCE'])
+        if error_message:
+            colorize_msg(error_message, 'error')
+            return
+
+        newRecord = {}
+        newRecord['ERFRAG_ID'] = erfragID
+        newRecord['ERFRAG_CODE'] = parmData['FRAGMENT']
+        newRecord['ERFRAG_DESC'] = parmData['FRAGMENT']
+        newRecord['ERFRAG_SOURCE'] = parmData['SOURCE']
+        newRecord['ERFRAG_DEPENDS'] = ','.join(dependencyList) if dependencyList else None
+        self.cfgData['G2_CONFIG']['CFG_ERFRAG'].append(newRecord)
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+        if self.doDebug:
+            debug(newRecord)
+
+    def do_setFragment(self, arg):
+        """
+        Sets configuration parameters for an existing feature
+
+        Syntax:
+            setFragment [partial_json_configuration]
+
+        Examples:
+            setFragment {"fragment": "GNR_CLOSE_NAME", "source": "./SCORES/NAME[(./GNR_FN>=95 ..."}
+
+        Caution:
+            The ID cannot be changed here. You must delete and re-add instead.
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['FRAGMENT'])
+            parmData['FRAGMENT'] = parmData['FRAGMENT'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        old_erfragRecord, message = self.lookupFragment(parmData['FRAGMENT'])
+        if not old_erfragRecord:
+            colorize_msg(message, 'warning')
+            return
+
+        # must use dict to create a new instance
+        erfragRecord = dict(old_erfragRecord)
+
+        update_cnt = 0
+        error_cnt = 0
+        for parmCode in parmData:
+            if parmCode == 'FRAGMENT':
+                pass
+
+            elif parmCode == 'SOURCE':
+                dependencyList, error_message = self.validateFragmentSource(parmData['SOURCE'])
+                if error_message:
+                    colorize_msg(error_message, 'error')
+                    return
+                else:
+                    ftypeRecord, update_cnt = self.update_if_different(erfragRecord, update_cnt, 'ERFRAG_SOURCE', 'source', parmData['SOURCE'])
+                    erfragRecord['ERFRAG_DEPENDS'] = ','.join(dependencyList) if dependencyList else None
+
+            elif parmCode == 'ID':
+                if parmData['ID'] != erfragRecord['ERFRAG_ID']:
+                    colorize_msg(f"Cannot change ID on fragments!", 'error')
+                    error_cnt += 1
+
+            elif parmCode == 'DEPENDS':
+                if parmData['DEPENDS'] != erfragRecord['ERFRAG_DEPENDS']:
+                    colorize_msg(f"Depends is calculated automatically!", 'caution')
+            else:
+                colorize_msg(f"Cannot {'set' if parmData[parmCode] else 'unset'} {parmCode} on fragments!", 'error')
+                error_cnt += 1
+
+        if error_cnt > 0:
+            colorize_msg(f'Errors encountered, fragment not updated!', 'error')
+        elif update_cnt < 1:
+            colorize_msg(f'No changes deted!', 'caution')
+        else:
+            self.cfgData['G2_CONFIG']['CFG_ERFRAG'].remove(old_erfragRecord)
+            self.cfgData['G2_CONFIG']['CFG_ERFRAG'].append(erfragRecord)
+            colorize_msg(f'Successfully updated!', 'success')
+            self.configUpdated = True
+
+    def do_listFragments(self, arg):
+        """
+        Returns the list of rule fragments.
+
+        Syntax:
+            listFragments [optional_search_filter] [optional_output_format = table, json or jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+
+        json_lines = []
+        for fragmentRecord in sorted(self.getRecordList('CFG_ERFRAG'), key=lambda k: k['ERFRAG_ID']):
+            fragmentJson = self.formatFragmentJson(fragmentRecord)
+            if arg and arg.lower() not in str(fragmentJson).lower():
+                continue
+            json_lines.append(fragmentJson)
+
+        self.print_json_lines(json_lines)
+
+    def do_getFragment(self, arg):
+        """
+        Returns a single rule fragment
+
+        Syntax:
+            getFragment [code or id] [optional_output_format = table, json or jsonl]
+        """
+        arg = self.check_arg_for_output_format(arg)
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'FRAGMENT', 'ERFRAG_ID', 'ERFRAG_CODE')
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        fragmentRecord = self.getRecord('CFG_ERFRAG', searchField, searchValue)
+        if not fragmentRecord:
+            colorize_msg(f"Fragment does not exist!", 'warning')
+            return
+        self.print_json_record(self.formatFragmentJson(fragmentRecord))
+
+    def do_deleteFragment(self, arg):
+        """
+        Deletes a rule fragment
+
+        Syntax:
+            deleteFragment [code or id]
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'FRAGMENT', 'ERFRAG_ID', 'ERFRAG_CODE')
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        fragmentRecord = self.getRecord('CFG_ERFRAG', searchField, searchValue)
+        if not fragmentRecord:
+            colorize_msg(f"Fragment does not exist", 'warning')
+            return
+
+        self.cfgData['G2_CONFIG']['CFG_ERFRAG'].remove(fragmentRecord)
+        colorize_msg(f'Successfully deleted!', 'success')
+        self.configUpdated = True
+
+
+    # ===== rule commands =====
+
+    def getRuleJson(self, record):
+
+        return {"id": record["ERRULE_ID"],
+                "rule": record["ERRULE_CODE"],
+                "desc": record["ERRULE_DESC"],
+                "resolve": record["RESOLVE"],
+                "relate": record["RELATE"],
+                "ref_score": record["REF_SCORE"],
+                "fragment": record["QUAL_ERFRAG_CODE"],
+                "disqualifier": showNullableJsonNumeric(record["DISQ_ERFRAG_CODE"]),
+                "rtype_id": showNullableJsonNumeric(record["RTYPE_ID"]),
+                "tier": showNullableJsonNumeric(record["ERRULE_TIER"])}
+
+    def do_listRules(self, arg):
+        """\nlistRules [search_filter]\n"""
+
+        json_lines = []
+        print()
+        for ruleRecord in sorted(self.getRecordList('CFG_ERRULE'), key=lambda k: k['ERRULE_ID']):
+            if arg and arg.lower() not in str(ruleRecord).lower():
+                continue
+            json_lines.append(self.getRuleJson(ruleRecord))
+        self.print_json_lines(json_lines)
+
+    def do_getRule(self, arg):
+        """\ngetRule [id]\ngetRule [name]\n"""
 
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
 
         try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ELEMENT": arg}
-            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
+            if arg.startswith('{'):
+                parmData = dictKeysUpper(json.loads(arg))
+            elif arg.isdigit():
+                parmData = {"ID": arg}
+            else:
+                parmData = {"RULE": arg}
+
+            if 'RULE' in parmData and len(parmData['RULE'].strip()) != 0:
+                searchField = 'ERRULE_CODE'
+                searchValue = parmData['RULE'].upper()
+            elif 'ID' in parmData and len(parmData['ID'].strip()) != 0:
+                searchField = 'ERRULE_ID'
+                searchValue = int(parmData['ID'])
+            else:
+                raise ValueError(arg)
         except (ValueError, KeyError) as err:
             colorize_msg(f'Syntax error: {err}', 'error')
             return
 
-        felemRecord = self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT'])
-        if not felemRecord:
-            colorize_msg('Element does not exist: %s. Use listElements to see valid elements.' % parmData['ELEMENT'],
-                              'B')
-            return
-
-        usedIn = []
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_FBOM'])):
-            if int(self.cfgData['G2_CONFIG']['CFG_FBOM'][i]['FELEM_ID']) == felemRecord['FELEM_ID']:
-                for j in range(len(self.cfgData['G2_CONFIG']['CFG_FTYPE'])):
-                    if int(self.cfgData['G2_CONFIG']['CFG_FTYPE'][j]['FTYPE_ID']) == \
-                            self.cfgData['G2_CONFIG']['CFG_FBOM'][i]['FTYPE_ID']:
-                        usedIn.append(self.cfgData['G2_CONFIG']['CFG_FTYPE'][j]['FTYPE_CODE'])
-        if usedIn:
-            colorize_msg(
-                'Can\'t delete %s, it is used in these feature(s): %s' % (parmData['ELEMENT'], usedIn), 'B')
-            return
+        foundRecords = self.getRecordList('CFG_ERRULE', searchField, searchValue)
+        if not foundRecords:
+            print('\nRecord not found!\n')
         else:
-            deleteCnt = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_FELEM'])):
-                if int(self.cfgData['G2_CONFIG']['CFG_FELEM'][i]['FELEM_ID']) == felemRecord['FELEM_ID']:
-                    del self.cfgData['G2_CONFIG']['CFG_FELEM'][i]
-                    deleteCnt = 1
-                    self.configUpdated = True
-                    break
+            print()
+            for thisRecord in sorted(foundRecords, key=lambda k: k['ERRULE_ID']):
+                self.print_json_record(self.getRuleJson(thisRecord))
+            print()
 
-            if deleteCnt == 0:
-                print('\nRecord not found!\n')
+    def do_deleteRule(self, arg):
+        """\ndeleteRule {"id": "<rule_id>"}\n"""
+
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        try:
+            if arg.startswith('{'):
+                parmData = dictKeysUpper(json.loads(arg))
+            elif arg.isdigit():
+                parmData = {"ID": arg}
             else:
-                colorize_msg('Successfully deleted!', 'success')
+                parmData = {"RULE": arg}
 
+            if 'RULE' in parmData and len(parmData['RULE'].strip()) != 0:
+                searchField = 'ERRULE_CODE'
+                searchValue = arg.upper()
+            elif 'ID' in parmData and int(parmData['ID']) != 0:
+                searchField = 'ERRULE_ID'
+                searchValue = int(parmData['ID'])
+            else:
+                raise ValueError(arg)
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        deleteCnt = 0
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERRULE']) - 1, -1, -1):
+            if self.cfgData['G2_CONFIG']['CFG_ERRULE'][i][searchField] == searchValue:
+                del self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]
+                deleteCnt += 1
+                self.configUpdated = True
+        if deleteCnt == 0:
+            colorize_msg('Record not found!', 'S')
+        colorize_msg('Successfully deleted!', 'success')
+
+    def do_setRule(self, arg):
+        """
+        Syntax:
+            setRule <partial json configuration>
+
+        Examples:
+            setRule {"id": 111, "resolve": "No"}
+            setRule {"id": 111, "relate": "Yes", "rtype_id": 2}
+
+        Notes:
+            You must at least specify the rule "id" you want to edit.  Then you can change the following settings:
+                - resolve
+                - relate
+                - rtype    <-this is the relationship type 1=Resolve, 2=Possible match, 3=Possibly related, 4=Name only
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            parmData['ID'] = int(parmData['ID'])
+
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        print()
+
+        # lookup rule and error if doesn't exist
+        listID = -1
+        for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERRULE'])):
+            if self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]['ERRULE_ID'] == parmData['ID']:
+                listID = i
+        if listID == -1:
+            colorize_msg('Rule %s does not exist!' % parmData['ID'])
+            return
+
+        if parmData.get('RESOLVE'):
+            if parmData['RESOLVE'].upper() not in ('YES', 'NO'):
+                colorize_msg('ERROR: Resolve should be Yes or No', 'B')
+                return
+            if parmData['RESOLVE'].upper() == 'YES':
+                parmData['RELATE'] = 'No'
+                parmData['RTYPE_ID'] = 1
+
+        if parmData.get('RELATE'):
+            if parmData['RELATE'].upper() not in ('YES', 'NO'):
+                colorize_msg('ERROR: Relate should be Yes or No', 'B')
+                return
+            if parmData['RELATE'].upper() == 'YES':
+                if parmData.get('RTYPE_ID'):
+                    if parmData.get('RTYPE_ID') not in (2,3,4):
+                        colorize_msg('ERROR: Relationship type (RTYPE_ID) must be 2 (possible match), 3 (possibly related) or 4 (name only)', 'B')
+                        return
+                elif self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RTYPE_ID'] == 1:
+                    parmData['RTYPE_ID'] = 2
+
+        if parmData.get('RULE'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['ERRULE_CODE'] = parmData['RULE']
+            colorize_msg('Rule code updated!')
+            self.configUpdated = True
+
+        if parmData.get('DESC'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['ERRULE_DESC'] = parmData['DESC']
+            colorize_msg('Rule description updated!')
+            self.configUpdated = True
+
+        if parmData.get('FRAGMENT'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['QUAL_ERFRAG_CODE'] = parmData['FRAGMENT']
+            colorize_msg('Rule fragment updated!')
+            self.configUpdated = True
+
+        if parmData.get('DISQUALIFIER'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['DISQ_ERFRAG_CODE'] = parmData['DISQUALIFIER']
+            colorize_msg('Rule disqualifier updated!')
+            self.configUpdated = True
+
+        if parmData.get('RESOLVE'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RESOLVE'] = parmData['RESOLVE'].capitalize()
+            colorize_msg('Rule resolve updated!')
+            self.configUpdated = True
+
+        if parmData.get('RELATE'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RELATE'] = parmData['RELATE'].capitalize()
+            colorize_msg('Rule relate updated!')
+            self.configUpdated = True
+
+        if parmData.get('RTYPE_ID'):
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RTYPE_ID'] = parmData['RTYPE_ID']
+            colorize_msg('Relationship type (RTYPE_ID) updated!')
+            self.configUpdated = True
+
+        print()
+
+    def do_addRule(self, arg):
+        """
+        \n\taddRule {"id": 130, "rule": "SF1_CNAME", "tier": 30, "resolve": "Yes", "relate": "No", "ref_score": 8, "fragment": "SF1_CNAME", "disqualifier": "DIFF_EXCL", "rtype_id": 1}
+        \n\n\tFor additional example structures, use getRule or listRules\n
+        """
+
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            parmData['ID'] = int(parmData['ID'])
+        except (ValueError, KeyError) as e:
+            print('\nError with argument(s) or parsing JSON - %s \n' % e)
+        else:
+
+            maxID = 0
+            for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERRULE'])):
+                if self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]['ERRULE_CODE'] == parmData['RULE']:
+                    colorize_msg('Rule %s already exists!' % parmData['FRAGMENT'], 'B')
+                    return
+                if 'ID' in parmData and int(self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]['ERRULE_ID']) == int(
+                        parmData['ID']):
+                    colorize_msg('Rule ID %s already exists!' % parmData['ID'], 'B')
+                    return
+                if self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]['ERRULE_ID'] > maxID:
+                    maxID = self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]['ERRULE_ID']
+
+            if 'ID' not in parmData:
+                parmData['ID'] = maxID + 1 if maxID >= 1000 else 1000
+
+            # must have a valid fragment field
+            if 'FRAGMENT' not in parmData:
+                colorize_msg('A fragment source field is required!', 'B')
+                return
+            else:
+                # lookup the fragment code
+                fragRecord = self.getRecord('CFG_ERFRAG', 'ERFRAG_CODE', parmData['FRAGMENT'])
+                if not fragRecord:
+                    colorize_msg('Invalid fragment reference: %s' % parmData['FRAGMENT'], 'B')
+                    return
+
+            # if no rule code, replace with fragment
+            if 'CODE' not in parmData:
+                parmData['CODE'] = parmData['FRAGMENT']
+
+            # default or validate the disqualifier
+            if 'DISQUALIFIER' not in parmData or not parmData['DISQUALIFIER']:
+                parmData['DISQUALIFIER'] = None
+            else:
+                # lookup the disqualifier code
+                fragRecord = self.getRecord('CFG_ERFRAG', 'ERFRAG_CODE', parmData['DISQUALIFIER'])
+                if not fragRecord:
+                    colorize_msg('Invalid disqualifer reference: %s' % parmData['DISQUALIFIER'], 'B')
+                    return
+
+            if 'TIER' not in parmData or not parmData['TIER']:
+                parmData['TIER'] = None
+            else:
+                if not isinstance(parmData['TIER'], int) and parmData['TIER'].lower() != 'null':
+                    try:
+                        parmData['TIER'] = int(parmData['TIER'])
+                    except ValueError:
+                        colorize_msg(f'Invalid TIER value ({parmData["TIER"]}), should be an integer', 'B')
+                        return
+
+            newRecord = {}
+            newRecord['ERRULE_ID'] = int(parmData['ID'])
+            newRecord['ERRULE_CODE'] = parmData['RULE']
+            newRecord['ERRULE_DESC'] = parmData['DESC'] if 'DESC' in parmData and parmData['DESC'] else parmData['RULE']
+            newRecord['RESOLVE'] = parmData['RESOLVE']
+            newRecord['RELATE'] = parmData['RELATE']
+            newRecord['REF_SCORE'] = int(parmData['REF_SCORE'])
+            newRecord['RTYPE_ID'] = int(parmData['RTYPE_ID'])
+            newRecord['QUAL_ERFRAG_CODE'] = parmData['FRAGMENT']
+            newRecord['DISQ_ERFRAG_CODE'] = storeNullableJsonString(parmData['DISQUALIFIER'])
+            newRecord['ERRULE_TIER'] = parmData['TIER']
+
+            self.cfgData['G2_CONFIG']['CFG_ERRULE'].append(newRecord)
+            self.configUpdated = True
+            colorize_msg('Successfully added!', 'success')
+            if self.doDebug:
+                debug(newRecord)
+
+
+
+
+# ===== other miscellaneous functions =====
 
     # Compatibility version commands
 
@@ -4545,587 +5056,6 @@ class G2CmdShell(cmd.Cmd, object):
             self.configUpdated = True
 
         print()
-
-    # ===== fragment commands =====
-
-    def getFragmentJson(self, record):
-
-        return {"id": record["ERFRAG_ID"],
-                "fragment": record["ERFRAG_CODE"],
-                "source": record["ERFRAG_SOURCE"],
-                "depends": record["ERFRAG_DEPENDS"]}
-
-    def do_listFragments(self, arg):
-        """\nlistFragments [search_filter]\n"""
-
-        json_lines = []
-        for thisRecord in sorted(self.getRecordList('CFG_ERFRAG'), key=lambda k: k['ERFRAG_ID']):
-            if arg and arg.lower() not in str(thisRecord).lower():
-                continue
-            json_lines.append(self.getFragmentJson(thisRecord))
-        self.print_json_lines(json_lines)
-
-    def do_getFragment(self, arg):
-        """\ngetFragment [id]\ngetFragment [fragment_name]\n"""
-
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            if arg.startswith('{'):
-                parmData = dictKeysUpper(json.loads(arg))
-            elif arg.isdigit():
-                parmData = {"ID": arg}
-            else:
-                parmData = {"FRAGMENT": arg}
-            if 'FRAGMENT' in parmData and len(parmData['FRAGMENT'].strip()) != 0:
-                searchField = 'ERFRAG_CODE'
-                searchValue = parmData['FRAGMENT'].upper()
-            elif 'ID' in parmData and len(parmData['ID'].strip()) != 0:
-                searchField = 'ERFRAG_ID'
-                searchValue = int(parmData['ID'])
-            else:
-                raise ValueError(arg)
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
-            return
-
-        foundRecords = self.getRecordList('CFG_ERFRAG', searchField, searchValue)
-        if not foundRecords:
-            print('\nRecord not found!\n')
-        else:
-            print()
-            for thisRecord in sorted(foundRecords, key=lambda k: k['ERFRAG_ID']):
-                self.print_json_record(self.getFragmentJson(thisRecord))
-            print()
-
-    def do_deleteFragment(self, arg):
-        """
-        \n\tdeleteFragment {"id": "<fragment_id>"}
-        \n\tdeleteFragment {"fragment": "<fragment_code>"}\n
-        """
-
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            if arg.startswith('{'):
-                parmData = dictKeysUpper(json.loads(arg))
-            elif arg.isdigit():
-                parmData = {"ID": arg}
-            else:
-                parmData = {"FRAGMENT": arg}
-            if 'FRAGMENT' in parmData and len(parmData['FRAGMENT'].strip()) != 0:
-                searchField = 'ERFRAG_CODE'
-                searchValue = parmData['FRAGMENT'].upper()
-            elif 'ID' in parmData and len(parmData['ID'].strip()) != 0:
-                searchField = 'ERFRAG_ID'
-                searchValue = int(parmData['ID'])
-            else:
-                raise ValueError(arg)
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
-            return
-
-        deleteCnt = 0
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERFRAG']) - 1, -1, -1):
-            if self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i][searchField] == searchValue:
-                del self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i]
-                deleteCnt += 1
-                self.configUpdated = True
-        if deleteCnt == 0:
-            print('\nRecord not found!\n')
-        colorize_msg('Successfully deleted!', 'success')
-
-    def do_setFragment(self, arg):
-        """\nsetFragment {"id": "<fragment_id>", "fragment": "<fragment_code>", "source": "<fragment_source>"}\n"""
-
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            if arg.startswith('{'):
-                parmData = dictKeysUpper(json.loads(arg))
-            elif arg.isdigit():
-                parmData = {"ID": arg}
-            else:
-                parmData = {"FRAGMENT": arg}
-            if 'FRAGMENT' in parmData and len(parmData['FRAGMENT'].strip()) != 0:
-                searchField = 'ERFRAG_CODE'
-                searchValue = parmData['FRAGMENT'].upper()
-            elif 'ID' in parmData and len(parmData['ID'].strip()) != 0:
-                searchField = 'ERFRAG_ID'
-                searchValue = int(parmData['ID'])
-            else:
-                raise ValueError(arg)
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
-            return
-
-        print()
-
-        # lookup fragment and error if doesn't exist
-        listID = -1
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERFRAG']) - 1, -1, -1):
-            if self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i][searchField] == searchValue:
-                listID = i
-        if listID == -1:
-            colorize_msg('Fragment does not exist!')
-            return
-
-        # make the updates
-        for parmCode in parmData:
-            if parmCode == 'ID':
-                pass
-
-            elif parmCode == 'SOURCE':
-                # compute dependencies from source
-                # example: './FRAGMENT[./SAME_NAME>0 and ./SAME_STAB>0] or ./FRAGMENT[./SAME_NAME1>0 and ./SAME_STAB1>0]'
-                dependencyList = []
-                sourceString = parmData['SOURCE']
-                startPos = sourceString.find('FRAGMENT[')
-                while startPos > 0:
-                    fragmentString = sourceString[startPos:sourceString.find(']', startPos) + 1]
-                    sourceString = sourceString.replace(fragmentString, '')
-                    # parse the fragment string
-                    currentFrag = 'eof'
-                    fragmentChars = list(fragmentString)
-                    potentialErrorString = ''
-                    for thisChar in fragmentChars:
-                        potentialErrorString += thisChar
-                        if thisChar == '/':
-                            currentFrag = ''
-                        elif currentFrag != 'eof':
-                            if thisChar in '| =><)':
-                                # lookup the fragment code
-                                fragRecord = self.getRecord('CFG_ERFRAG', 'ERFRAG_CODE', currentFrag)
-                                if not fragRecord:
-                                    colorize_msg('Invalid fragment reference: %s' % currentFrag, 'B')
-                                    return
-                                else:
-                                    dependencyList.append(str(fragRecord['ERFRAG_ID']))
-                                currentFrag = 'eof'
-                            else:
-                                currentFrag += thisChar
-                    # next list of fragments
-                    startPos = sourceString.find('FRAGMENT[')
-
-        self.cfgData['G2_CONFIG']['CFG_ERFRAG'][listID]['ERFRAG_SOURCE'] = parmData['SOURCE']
-        self.cfgData['G2_CONFIG']['CFG_ERFRAG'][listID]['ERFRAG_DEPENDS'] = ','.join(dependencyList)
-        colorize_msg('Fragment source updated!')
-        self.configUpdated = True
-
-        print()
-
-    def do_addFragment(self, arg):
-        """
-        \n\taddFragment {"id": "<fragment_id>", "fragment": "<fragment_code>", "source": "<fragment_source>"}
-        \n\n\tFor additional example structures, use getFragment or listFragments\n
-        """
-
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['FRAGMENT'] = parmData['FRAGMENT'].upper()
-        except (ValueError, KeyError) as e:
-            print('\nError with argument(s) or parsing JSON - %s \n' % e)
-        else:
-
-            maxID = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERFRAG'])):
-                if self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i]['ERFRAG_CODE'] == parmData['FRAGMENT']:
-                    colorize_msg('Fragment %s already exists!' % parmData['FRAGMENT'], 'B')
-                    return
-                if 'ID' in parmData and int(self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i]['ERFRAG_ID']) == int(
-                        parmData['ID']):
-                    colorize_msg('Fragment ID %s already exists!' % parmData['ID'], 'B')
-                    return
-                if self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i]['ERFRAG_ID'] > maxID:
-                    maxID = self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i]['ERFRAG_ID']
-
-            if 'ID' not in parmData:
-                parmData['ID'] = maxID + 1 if maxID >= 1000 else 1000
-
-            # must have a source field
-            if 'SOURCE' not in parmData:
-                colorize_msg('A fragment source field is required!', 'B')
-                return
-
-            # compute dependencies from source
-            # example: './FRAGMENT[./SAME_NAME>0 and ./SAME_STAB>0] or ./FRAGMENT[./SAME_NAME1>0 and ./SAME_STAB1>0]'
-            dependencyList = []
-            sourceString = parmData['SOURCE']
-            startPos = sourceString.find('FRAGMENT[')
-            while startPos > 0:
-                fragmentString = sourceString[startPos:sourceString.find(']', startPos) + 1]
-                sourceString = sourceString.replace(fragmentString, '')
-                # parse the fragment string
-                currentFrag = 'eof'
-                fragmentChars = list(fragmentString)
-                potentialErrorString = ''
-                for thisChar in fragmentChars:
-                    potentialErrorString += thisChar
-                    if thisChar == '/':
-                        currentFrag = ''
-                    elif currentFrag != 'eof':
-                        if thisChar in '| =><)':
-                            # lookup the fragment code
-                            fragRecord = self.getRecord('CFG_ERFRAG', 'ERFRAG_CODE', currentFrag)
-                            if not fragRecord:
-                                colorize_msg('Invalid fragment reference: %s' % currentFrag, 'B')
-                                return
-                            else:
-                                dependencyList.append(str(fragRecord['ERFRAG_ID']))
-                            currentFrag = 'eof'
-                        else:
-                            currentFrag += thisChar
-                # next list of fragments
-                startPos = sourceString.find('FRAGMENT[')
-
-            newRecord = {}
-            newRecord['ERFRAG_ID'] = int(parmData['ID'])
-            newRecord['ERFRAG_CODE'] = parmData['FRAGMENT']
-            newRecord['ERFRAG_DESC'] = parmData['FRAGMENT']
-            newRecord['ERFRAG_SOURCE'] = parmData['SOURCE']
-            newRecord['ERFRAG_DEPENDS'] = ','.join(dependencyList)
-            self.cfgData['G2_CONFIG']['CFG_ERFRAG'].append(newRecord)
-            self.configUpdated = True
-            colorize_msg('Successfully added!', 'success')
-            if self.doDebug:
-                debug(newRecord)
-
-    def do_copyFragment(self, arg):
-        """\ncopyFragment {"currentFragment": "<fragment_code>", "newID": "<fragment_id>", "newFragment": "<fragment_code>"}\n"""
-
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['CURRENTFRAGMENT'] = parmData['CURRENTFRAGMENT'].upper()
-            parmData['NEWFRAGMENT'] = parmData['NEWFRAGMENT'].upper()
-        except (ValueError, KeyError) as e:
-            print('\nError with argument(s) or parsing JSON - %s \n' % e)
-        else:
-
-            # lookup fragment and error if doesn't exist
-            currentFragmentID = -1
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERFRAG']) - 1, -1, -1):
-                if self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i]['ERFRAG_CODE'] == parmData['CURRENTFRAGMENT']:
-                    currentFragmentID = i
-            if currentFragmentID == -1:
-                colorize_msg('Fragment %s does not exist!' % parmData['CURRENTFRAGMENT'], 'B')
-                return
-
-            maxID = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERFRAG'])):
-                if self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i]['ERFRAG_CODE'] == parmData['NEWFRAGMENT']:
-                    colorize_msg('Fragment %s already exists!' % parmData['NEWFRAGMENT'], 'B')
-                    return
-                if 'NEWID' in parmData and int(self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i]['ERFRAG_ID']) == int(
-                        parmData['NEWID']):
-                    colorize_msg('Fragment ID %s already exists!' % parmData['NEWID'], 'B')
-                    return
-                if self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i]['ERFRAG_ID'] > maxID:
-                    maxID = self.cfgData['G2_CONFIG']['CFG_ERFRAG'][i]['ERFRAG_ID']
-
-            if 'NEWID' not in parmData:
-                parmData['NEWID'] = maxID + 1 if maxID >= 1000 else 1000
-
-            fragmentCopy = self.cfgData['G2_CONFIG']['CFG_ERFRAG'][currentFragmentID].copy()
-            fragmentCopy['ERFRAG_ID'] = int(parmData['NEWID'])
-            fragmentCopy['ERFRAG_CODE'] = parmData['NEWFRAGMENT']
-            self.cfgData['G2_CONFIG']['CFG_ERFRAG'].append(fragmentCopy)
-            self.configUpdated = True
-            colorize_msg('Successfully copied!', 'B')
-            if self.doDebug:
-                debug(fragmentCopy)
-
-    # ===== rule commands =====
-
-    def getRuleJson(self, record):
-
-        return {"id": record["ERRULE_ID"],
-                "rule": record["ERRULE_CODE"],
-                "desc": record["ERRULE_DESC"],
-                "resolve": record["RESOLVE"],
-                "relate": record["RELATE"],
-                "ref_score": record["REF_SCORE"],
-                "fragment": record["QUAL_ERFRAG_CODE"],
-                "disqualifier": showNullableJsonNumeric(record["DISQ_ERFRAG_CODE"]),
-                "rtype_id": showNullableJsonNumeric(record["RTYPE_ID"]),
-                "tier": showNullableJsonNumeric(record["ERRULE_TIER"])}
-
-    def do_listRules(self, arg):
-        """\nlistRules [search_filter]\n"""
-
-        json_lines = []
-        print()
-        for ruleRecord in sorted(self.getRecordList('CFG_ERRULE'), key=lambda k: k['ERRULE_ID']):
-            if arg and arg.lower() not in str(ruleRecord).lower():
-                continue
-            json_lines.append(self.getRuleJson(ruleRecord))
-        self.print_json_lines(json_lines)
-
-    def do_getRule(self, arg):
-        """\ngetRule [id]\ngetRule [name]\n"""
-
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            if arg.startswith('{'):
-                parmData = dictKeysUpper(json.loads(arg))
-            elif arg.isdigit():
-                parmData = {"ID": arg}
-            else:
-                parmData = {"RULE": arg}
-
-            if 'RULE' in parmData and len(parmData['RULE'].strip()) != 0:
-                searchField = 'ERRULE_CODE'
-                searchValue = parmData['RULE'].upper()
-            elif 'ID' in parmData and len(parmData['ID'].strip()) != 0:
-                searchField = 'ERRULE_ID'
-                searchValue = int(parmData['ID'])
-            else:
-                raise ValueError(arg)
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
-            return
-
-        foundRecords = self.getRecordList('CFG_ERRULE', searchField, searchValue)
-        if not foundRecords:
-            print('\nRecord not found!\n')
-        else:
-            print()
-            for thisRecord in sorted(foundRecords, key=lambda k: k['ERRULE_ID']):
-                self.print_json_record(self.getRuleJson(thisRecord))
-            print()
-
-    def do_deleteRule(self, arg):
-        """\ndeleteRule {"id": "<rule_id>"}\n"""
-
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            if arg.startswith('{'):
-                parmData = dictKeysUpper(json.loads(arg))
-            elif arg.isdigit():
-                parmData = {"ID": arg}
-            else:
-                parmData = {"RULE": arg}
-
-            if 'RULE' in parmData and len(parmData['RULE'].strip()) != 0:
-                searchField = 'ERRULE_CODE'
-                searchValue = arg.upper()
-            elif 'ID' in parmData and int(parmData['ID']) != 0:
-                searchField = 'ERRULE_ID'
-                searchValue = int(parmData['ID'])
-            else:
-                raise ValueError(arg)
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
-            return
-
-        deleteCnt = 0
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERRULE']) - 1, -1, -1):
-            if self.cfgData['G2_CONFIG']['CFG_ERRULE'][i][searchField] == searchValue:
-                del self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]
-                deleteCnt += 1
-                self.configUpdated = True
-        if deleteCnt == 0:
-            colorize_msg('Record not found!', 'S')
-        colorize_msg('Successfully deleted!', 'success')
-
-    def do_setRule(self, arg):
-        """
-        Syntax:
-            setRule <partial json configuration>
-
-        Examples:
-            setRule {"id": 111, "resolve": "No"}
-            setRule {"id": 111, "relate": "Yes", "rtype_id": 2}
-
-        Notes:
-            You must at least specify the rule "id" you want to edit.  Then you can change the following settings:
-                - resolve
-                - relate
-                - rtype    <-this is the relationship type 1=Resolve, 2=Possible match, 3=Possibly related, 4=Name only
-        """
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['ID'] = int(parmData['ID'])
-
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
-            return
-
-        print()
-
-        # lookup rule and error if doesn't exist
-        listID = -1
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERRULE'])):
-            if self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]['ERRULE_ID'] == parmData['ID']:
-                listID = i
-        if listID == -1:
-            colorize_msg('Rule %s does not exist!' % parmData['ID'])
-            return
-
-        if parmData.get('RESOLVE'):
-            if parmData['RESOLVE'].upper() not in ('YES', 'NO'):
-                colorize_msg('ERROR: Resolve should be Yes or No', 'B')
-                return
-            if parmData['RESOLVE'].upper() == 'YES':
-                parmData['RELATE'] = 'No'
-                parmData['RTYPE_ID'] = 1
-
-        if parmData.get('RELATE'):
-            if parmData['RELATE'].upper() not in ('YES', 'NO'):
-                colorize_msg('ERROR: Relate should be Yes or No', 'B')
-                return
-            if parmData['RELATE'].upper() == 'YES':
-                if parmData.get('RTYPE_ID'):
-                    if parmData.get('RTYPE_ID') not in (2,3,4):
-                        colorize_msg('ERROR: Relationship type (RTYPE_ID) must be 2 (possible match), 3 (possibly related) or 4 (name only)', 'B')
-                        return
-                elif self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RTYPE_ID'] == 1:
-                    parmData['RTYPE_ID'] = 2
-
-        if parmData.get('RULE'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['ERRULE_CODE'] = parmData['RULE']
-            colorize_msg('Rule code updated!')
-            self.configUpdated = True
-
-        if parmData.get('DESC'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['ERRULE_DESC'] = parmData['DESC']
-            colorize_msg('Rule description updated!')
-            self.configUpdated = True
-
-        if parmData.get('FRAGMENT'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['QUAL_ERFRAG_CODE'] = parmData['FRAGMENT']
-            colorize_msg('Rule fragment updated!')
-            self.configUpdated = True
-
-        if parmData.get('DISQUALIFIER'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['DISQ_ERFRAG_CODE'] = parmData['DISQUALIFIER']
-            colorize_msg('Rule disqualifier updated!')
-            self.configUpdated = True
-
-        if parmData.get('RESOLVE'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RESOLVE'] = parmData['RESOLVE'].capitalize()
-            colorize_msg('Rule resolve updated!')
-            self.configUpdated = True
-
-        if parmData.get('RELATE'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RELATE'] = parmData['RELATE'].capitalize()
-            colorize_msg('Rule relate updated!')
-            self.configUpdated = True
-
-        if parmData.get('RTYPE_ID'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RTYPE_ID'] = parmData['RTYPE_ID']
-            colorize_msg('Relationship type (RTYPE_ID) updated!')
-            self.configUpdated = True
-
-        print()
-
-    def do_addRule(self, arg):
-        """
-        \n\taddRule {"id": 130, "rule": "SF1_CNAME", "tier": 30, "resolve": "Yes", "relate": "No", "ref_score": 8, "fragment": "SF1_CNAME", "disqualifier": "DIFF_EXCL", "rtype_id": 1}
-        \n\n\tFor additional example structures, use getRule or listRules\n
-        """
-
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['ID'] = int(parmData['ID'])
-        except (ValueError, KeyError) as e:
-            print('\nError with argument(s) or parsing JSON - %s \n' % e)
-        else:
-
-            maxID = 0
-            for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERRULE'])):
-                if self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]['ERRULE_CODE'] == parmData['RULE']:
-                    colorize_msg('Rule %s already exists!' % parmData['FRAGMENT'], 'B')
-                    return
-                if 'ID' in parmData and int(self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]['ERRULE_ID']) == int(
-                        parmData['ID']):
-                    colorize_msg('Rule ID %s already exists!' % parmData['ID'], 'B')
-                    return
-                if self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]['ERRULE_ID'] > maxID:
-                    maxID = self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]['ERRULE_ID']
-
-            if 'ID' not in parmData:
-                parmData['ID'] = maxID + 1 if maxID >= 1000 else 1000
-
-            # must have a valid fragment field
-            if 'FRAGMENT' not in parmData:
-                colorize_msg('A fragment source field is required!', 'B')
-                return
-            else:
-                # lookup the fragment code
-                fragRecord = self.getRecord('CFG_ERFRAG', 'ERFRAG_CODE', parmData['FRAGMENT'])
-                if not fragRecord:
-                    colorize_msg('Invalid fragment reference: %s' % parmData['FRAGMENT'], 'B')
-                    return
-
-            # if no rule code, replace with fragment
-            if 'CODE' not in parmData:
-                parmData['CODE'] = parmData['FRAGMENT']
-
-            # default or validate the disqualifier
-            if 'DISQUALIFIER' not in parmData or not parmData['DISQUALIFIER']:
-                parmData['DISQUALIFIER'] = None
-            else:
-                # lookup the disqualifier code
-                fragRecord = self.getRecord('CFG_ERFRAG', 'ERFRAG_CODE', parmData['DISQUALIFIER'])
-                if not fragRecord:
-                    colorize_msg('Invalid disqualifer reference: %s' % parmData['DISQUALIFIER'], 'B')
-                    return
-
-            if 'TIER' not in parmData or not parmData['TIER']:
-                parmData['TIER'] = None
-            else:
-                if not isinstance(parmData['TIER'], int) and parmData['TIER'].lower() != 'null':
-                    try:
-                        parmData['TIER'] = int(parmData['TIER'])
-                    except ValueError:
-                        colorize_msg(f'Invalid TIER value ({parmData["TIER"]}), should be an integer', 'B')
-                        return
-
-            newRecord = {}
-            newRecord['ERRULE_ID'] = int(parmData['ID'])
-            newRecord['ERRULE_CODE'] = parmData['RULE']
-            newRecord['ERRULE_DESC'] = parmData['DESC'] if 'DESC' in parmData and parmData['DESC'] else parmData['RULE']
-            newRecord['RESOLVE'] = parmData['RESOLVE']
-            newRecord['RELATE'] = parmData['RELATE']
-            newRecord['REF_SCORE'] = int(parmData['REF_SCORE'])
-            newRecord['RTYPE_ID'] = int(parmData['RTYPE_ID'])
-            newRecord['QUAL_ERFRAG_CODE'] = parmData['FRAGMENT']
-            newRecord['DISQ_ERFRAG_CODE'] = storeNullableJsonString(parmData['DISQUALIFIER'])
-            newRecord['ERRULE_TIER'] = parmData['TIER']
-
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'].append(newRecord)
-            self.configUpdated = True
-            colorize_msg('Successfully added!', 'success')
-            if self.doDebug:
-                debug(newRecord)
 
     # ===== system parameters  =====
 
