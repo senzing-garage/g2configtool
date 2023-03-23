@@ -54,19 +54,19 @@ class Colors:
 
     @classmethod
     def set_theme(cls, theme):
-        # best for dark backgrounds
         if theme.upper() == 'DEFAULT':
             cls.TABLE_TITLE = cls.FG_GREY42
             cls.ROW_TITLE = cls.FG_GREY42
             cls.COLUMN_HEADER = cls.FG_GREY42
             cls.ENTITY_COLOR = cls.FG_MEDIUMORCHID1
             cls.DSRC_COLOR = cls.FG_ORANGERED1
-            cls.ATTR_COLOR = cls.FG_CORNFLOWERBLUE
+            cls.ATTR_COLOR = cls.FG_SYSTEMBLUE
             cls.GOOD = cls.FG_CHARTREUSE3
             cls.BAD = cls.FG_RED3
             cls.CAUTION = cls.FG_GOLD3
             cls.HIGHLIGHT1 = cls.FG_DEEPPINK4
             cls.HIGHLIGHT2 = cls.FG_DEEPSKYBLUE1
+        # best for dark backgrounds
         elif theme.upper() == 'LIGHT':
             cls.TABLE_TITLE = cls.FG_LIGHTBLACK
             cls.ROW_TITLE = cls.FG_LIGHTBLACK
@@ -79,6 +79,7 @@ class Colors:
             cls.CAUTION = cls.FG_LIGHTYELLOW
             cls.HIGHLIGHT1 = cls.FG_LIGHTMAGENTA
             cls.HIGHLIGHT2 = cls.FG_LIGHTCYAN
+        # best for light backgrounds
         elif theme.upper() == 'DARK':
             cls.TABLE_TITLE = cls.FG_LIGHTBLACK
             cls.ROW_TITLE = cls.FG_LIGHTBLACK
@@ -151,7 +152,6 @@ class Colors:
     FG_CORNFLOWERBLUE = '\033[38;5;69m'
     FG_HOTPINK = '\033[38;5;206m'
     FG_DEEPPINK4 = '\033[38;5;89m'
-    FG_MAGENTA3 = '\033[38;5;164m'
     FG_SALMON = '\033[38;5;209m'
     FG_MEDIUMORCHID1 = '\033[38;5;207m'
     FG_NAVAJOWHITE3 = '\033[38;5;144m'
@@ -253,44 +253,46 @@ class G2CmdShell(cmd.Cmd, object):
 
 # ===== custom help section =====
 
-    def do_help(self, *args):
-        if not args[0]:
+
+    def do_help(self, help_topic):
+        if not help_topic:
             self.help_overview()
-        else:
-            func_name = args[0]
-            if func_name not in self.get_names():
-                func_name = 'do_' + func_name
-            if func_name in self.get_names():
-                if getattr(self, func_name).__doc__:
-                    help_lines = textwrap.dedent(getattr(self, func_name).__doc__).split('\n')
-                    help_text = ''
-                    headers = ['Syntax:', 'Examples:', 'Example:', 'Notes:', 'Caution:']
-                    current_section = ''
-                    for line in help_lines:
-                        line_color = ''
-                        if line in headers:
-                            current_section = line
-                            if current_section == 'Caution:':
-                                line_color = 'caution, italics'
-                            else:
-                                line_color = 'highlight2'
-                        elif line:
-                            if current_section == 'Caution:':
-                                line_color = 'caution, italics'
-                            elif current_section not in ('Syntax:', 'Examples:', 'Example:'):
-                                line_color = 'dim'
-                        if func_name[3:] in line and not line_color:
-                            sep_column = line.find(func_name[3:]) + len(func_name[3:])
-                            help_text += line[0:sep_column] + colorize(line[sep_column:], 'dim') + '\n'
-                        else:
-                            help_text += colorize(line, line_color) + '\n'
+            return
 
+        if help_topic not in self.get_names():
+            help_topic = 'do_' + help_topic
+            if help_topic not in self.get_names():
+                cmd.Cmd.do_help(self, help_topic[3:])
+                return
 
-                    print(help_text)
-                else:
-                    colorize_msg(f'No help text found for {func_name}', 'warning')
+        topic_docstring = getattr(self, help_topic).__doc__
+        if not topic_docstring:
+            colorize_msg(f'No help found for {help_topic}', 'warning')
+            return
+
+        help_text = current_section = ''
+        headers = ['Syntax:', 'Examples:', 'Example:', 'Notes:', 'Caution:']
+        help_lines = textwrap.dedent(topic_docstring).split('\n')
+
+        for line in help_lines:
+            line_color = ''
+            if line:
+                if line in headers:
+                    line_color = 'highlight2'
+                    current_section = line
+
+                if current_section == 'Caution:':
+                    line_color = 'caution, italics'
+                elif current_section not in ('Syntax:', 'Examples:', 'Example:'):
+                    line_color = ''
+
+            if help_topic[3:] in line and not line_color:
+                sep_column = line.find(help_topic[3:]) + len(help_topic[3:])
+                help_text += line[0:sep_column] + colorize(line[sep_column:], 'dim') + '\n'
             else:
-                cmd.Cmd.do_help(self, *args)
+                help_text += colorize(line, line_color) + '\n'
+
+        print(help_text)
 
     def help_all(self):
         args = ('',)
@@ -298,18 +300,18 @@ class G2CmdShell(cmd.Cmd, object):
 
     def help_overview(self):
         print(textwrap.dedent(f'''
-        {colorize('This utility allows you to configure a Senzing instance!', 'dim')}
+        {colorize('This utility allows you to configure a Senzing instance!', '')}
 
-        {colorize('Senzing compares records within and across data sources.  Records consist of features and features have attributes.', 'dim')}
-        {colorize('For instance, the NAME feature has attributes such as NAME_FIRST and NAME_LAST for a person and NAME_ORG for an', 'dim')}
-        {colorize('organization.', 'dim')}
+        {colorize('Senzing compares records within and across data sources.  Records consist of features and features have attributes.', '')}
+        {colorize('For instance, the NAME feature has attributes such as NAME_FIRST and NAME_LAST for a person and NAME_ORG for an', '')}
+        {colorize('organization.', '')}
 
-        {colorize('Features are standardized and expressed in various ways to create candidate keys, and when candidates are found all', 'dim')}
-        {colorize('of their features are compared to the incoming record''s features to see how close they actually are.', 'dim')}
+        {colorize('Features are standardized and expressed in various ways to create candidate keys, and when candidates are found all', '')}
+        {colorize('of their features are compared to the incoming record''s features to see how close they actually are.', '')}
 
-        {colorize('Finally, a set of rules or "principles" are applied to each candidate record''s feature scores to see if the incoming', 'dim')}
-        {colorize('record should resolve to an existing entity or become a new one. In either case, the rules are also used to create', 'dim')}
-        {colorize('relationships between entities.', 'dim')}
+        {colorize('Finally, a set of rules or "principles" are applied to each candidate record''s feature scores to see if the incoming', '')}
+        {colorize('record should resolve to an existing entity or become a new one. In either case, the rules are also used to create', '')}
+        {colorize('relationships between entities.', '')}
 
         {colorize('Additional help:', 'highlight2')}
             help basic      {colorize('<- for commonly used commands', 'dim')}
@@ -317,7 +319,7 @@ class G2CmdShell(cmd.Cmd, object):
             help principles {colorize('<- to be used only with the guidance of Senzing support', 'dim')}
             help all        {colorize('<- to show all configuration commands', 'dim')}
 
-        {colorize('To understand more about configuring Senzing, please review:', 'dim')}
+        {colorize('To understand more about configuring Senzing, please review:', '')}
             {colorize('https://senzing.com/wp-content/uploads/Entity-Resolution-Processes-021320.pdf', 'highlight1, underline')}
             {colorize('https://senzing.com/wp-content/uploads/Principle-Based-Entity-Resolution-092519.pdf', 'highlight1, underline')}
             {colorize('https://senzing.zendesk.com/hc/en-us/articles/231925448-Generic-Entity-Specification-JSON-CSV-Mapping', 'highlight1, underline')}
@@ -326,8 +328,8 @@ class G2CmdShell(cmd.Cmd, object):
 
     def help_basic(self):
         print(textwrap.dedent(f'''
-        {colorize('Senzing comes pre-configured with all the settings needed to resolve persons and organizations.  Usually all that is required', 'dim')}
-        {colorize('is for you to register your data sources and start loading data based on the Generic Entity Specification.', 'dim')}
+        {colorize('Senzing comes pre-configured with all the settings needed to resolve persons and organizations.  Usually all that is required', '')}
+        {colorize('is for you to register your data sources and start loading data based on the Generic Entity Specification.', '')}
 
         {colorize('Data source commands:', 'highlight2')}
             addDataSource           {colorize('<- to register a new data source', 'dim')}
@@ -356,10 +358,10 @@ class G2CmdShell(cmd.Cmd, object):
 
     def help_features(self):
         print(textwrap.dedent(f'''
-        {colorize('New features and their attributes are rarely needed.  But when they are they are usually industry specific', 'dim')}
-        {colorize('identifiers (F1s) like medicare_provider_id or swift_code for a bank.  If you want some other kind of attribute like a grouping (FF)', 'dim')}
-        {colorize('or a physical attribute (FME, FMES), it is best to clone an existing feature by doing a getFeature, then modifying the json payload to', 'dim')}
-        {colorize('use it in an addFeature.', 'dim')}
+        {colorize('New features and their attributes are rarely needed.  But when they are they are usually industry specific', '')}
+        {colorize('identifiers (F1s) like medicare_provider_id or swift_code for a bank.  If you want some other kind of attribute like a grouping (FF)', '')}
+        {colorize('or a physical attribute (FME, FMES), it is best to clone an existing feature by doing a getFeature, then modifying the json payload to', '')}
+        {colorize('use it in an addFeature.', '')}
 
         {colorize('Commands to add or update features:', 'highlight2')}
             listFeatures            {colorize('<- to list all the features in the system', 'dim')}
@@ -368,8 +370,8 @@ class G2CmdShell(cmd.Cmd, object):
             setFeature              {colorize('<- to change a setting on an existing feature', 'dim')}
             deleteFeature           {colorize('<- to delete a feature added by mistake', 'dim')}
 
-        {colorize('Attributes are what you map your source data to.  If you add a new feature, you will also need to add attributes for it. Be sure to', 'dim')}
-        {colorize('use a unique ID for attributes and to classify them as either an ATTRIBUTE or an IDENTIFIER.', 'dim')}
+        {colorize('Attributes are what you map your source data to.  If you add a new feature, you will also need to add attributes for it. Be sure to', '')}
+        {colorize('use a unique ID for attributes and to classify them as either an ATTRIBUTE or an IDENTIFIER.', '')}
 
         {colorize('Commands to add or update attributes:', 'highlight2')}
             listAttributes          {colorize('<- to see all the attributes you can map to', 'dim')}
@@ -377,8 +379,8 @@ class G2CmdShell(cmd.Cmd, object):
             addAttribute            {colorize('<- add a new attribute from a json configuration', 'dim')}
             deleteAttribute         {colorize('<- to delete an attribute added by mistake', 'dim')}
 
-        {colorize('Some templates have been created to help you add new identifiers if needed. A template adds a feature and its required', 'dim')}
-        {colorize('attributes with one command.', 'dim')}
+        {colorize('Some templates have been created to help you add new identifiers if needed. A template adds a feature and its required', '')}
+        {colorize('attributes with one command.', '')}
 
         {colorize('Commands for using templates:', 'highlight2')}
             templateAdd             {colorize('<- add an identifier (F1) feature and attributes based on a template', 'dim')}
@@ -387,10 +389,10 @@ class G2CmdShell(cmd.Cmd, object):
 
     def help_principles(self):
         print(textwrap.dedent(f'''
-        {colorize('Before the principles are applied, the features and expressions created for incoming records are used to find candidates.', 'dim')}
-        {colorize('An example of an expression is name and DOB and there is an expression call on the feature "name" to automatically create it', 'dim')}
-        {colorize('if both a name and DOB are present on the incoming record.  Features and expressions used for candidates are also referred', 'dim')}
-        {colorize('to as candidate builders or candidate keys.', 'dim')}
+        {colorize('Before the principles are applied, the features and expressions created for incoming records are used to find candidates.', '')}
+        {colorize('An example of an expression is name and DOB and there is an expression call on the feature "name" to automatically create it', '')}
+        {colorize('if both a name and DOB are present on the incoming record.  Features and expressions used for candidates are also referred', '')}
+        {colorize('to as candidate builders or candidate keys.', '')}
 
         {colorize('Commands that help with configuring candidate keys:', 'highlight2')}
             listFeatures            {colorize('<- to see what features are used for candidates', 'dim')}
@@ -406,9 +408,9 @@ class G2CmdShell(cmd.Cmd, object):
             {colorize('new expressions instead.  You can extend composite key expressions with the addToNameHash command above, or add ', 'caution, italics')}
             {colorize('new expressions by using the addExpressionCall command above.', 'caution, italics')}
 
-        {colorize('Once the candidate matches have been found, scoring and rule evaluation takes place.  Scores are rolled up by behavior.', 'dim')}
-        {colorize('For instance, both addresses and phones have the behavior FF (Frequency Few). If they both score above their scoring', 'dim')}
-        {colorize('function''s close threshold, there would be two CLOSE_FFs (a fragment) which can be used in a rule such as NAME+CLOSE_FF.', 'dim')}
+        {colorize('Once the candidate matches have been found, scoring and rule evaluation takes place.  Scores are rolled up by behavior.', '')}
+        {colorize('For instance, both addresses and phones have the behavior FF (Frequency Few). If they both score above their scoring', '')}
+        {colorize('function''s close threshold, there would be two CLOSE_FFs (a fragment) which can be used in a rule such as NAME+CLOSE_FF.', '')}
 
         {colorize('Commands that help with configuring principles (rules) and scoring:', 'highlight2')}
             listRules               {colorize('<- these are the principles that are applied top down', 'dim')}
@@ -935,7 +937,7 @@ class G2CmdShell(cmd.Cmd, object):
     def do_setOutputFormat(self, arg):
         """
         Syntax:
-            setOutputFormat [table/jsonl/json]
+            setOutputFormat [table|jsonl|json]
         """
         if not arg:
             colorize_msg(f'current format is {self.current_output_format}', 'info')
@@ -2220,7 +2222,7 @@ class G2CmdShell(cmd.Cmd, object):
         return
 
 
-# ===== rules and fragments =====
+# ===== rules fragments =====
 
     def formatFragmentJson(self, record):
         return {'id': record['ERFRAG_ID'],
@@ -2472,7 +2474,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
-            self.required_parms(parmData, ['RULE, FRAGMENT'])
+            self.required_parms(parmData, ['RULE', 'FRAGMENT'])
             parmData['ID'] = int(parmData.get('ID', 0))
             parmData['RULE'] = parmData['RULE'].upper()
             parmData['FRAGMENT'] = parmData['FRAGMENT'].upper()
@@ -2510,9 +2512,19 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(message, 'error')
             return
 
+        if parmData['RESOLVE'] == 'Yes' and parmData['RELATE'] == 'Yes':
+            colorize_msg('A rule must resolve or relate, not both!', 'error')
+            return
+
         tier = parmData.get('TIER')
-        if tier and not isinstance(parmData['TIER'], int):
-            colorize_msg('Tier must be specified', 'error')
+        if parmData['RESOLVE'] and not tier:
+            colorize_msg('A tier matching ohter rules that could be considered similar must be specified for resolve rules!', 'error')
+            return
+
+
+        #tier = parmData.get('TIER')
+        #if tier and not isinstance(parmData['TIER'], int):
+        #    colorize_msg('Tier must be specified', 'error')
 
 
         if 'TIER' not in parmData or not parmData['TIER']:
@@ -2522,7 +2534,7 @@ class G2CmdShell(cmd.Cmd, object):
                 try:
                     parmData['TIER'] = int(parmData['TIER'])
                 except ValueError:
-                    colorize_msg(f'Invalid TIER value ({parmData["TIER"]}), should be an integer', 'B')
+                    colorize_msg(f'Tier value must be an integer', 'error')
                     return
 
         newRecord = {}
