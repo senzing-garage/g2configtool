@@ -230,7 +230,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         self.attributeClassList = ('NAME', 'ATTRIBUTE', 'IDENTIFIER', 'ADDRESS', 'PHONE', 'RELATIONSHIP', 'OTHER')
         self.lockedFeatureList = ('NAME', 'ADDRESS', 'PHONE', 'DOB', 'REL_LINK', 'REL_ANCHOR', 'REL_POINTER')
-        self.valid_behavior_codes = ['NAME','A1','A1E','A1ES','F1','F1E','F1ES','FF','FFE','FFES','FM','FME','FMES','FVM','FVME','FVMES']
+        self.valid_behavior_codes = ['NAME','A1','A1E','A1ES','F1','F1E','F1ES','FF','FFE','FFES','FM','FME','FMES','FVM','FVME','FVMES','NONE']
 
         self.doDebug = debug
 
@@ -253,15 +253,15 @@ class G2CmdShell(cmd.Cmd, object):
 
 # ===== custom help section =====
 
-
     def do_help(self, help_topic):
+        """"""
         if not help_topic:
             self.help_overview()
             return
 
-        if help_topic not in self.get_names():
+        if help_topic not in self.get_names(include_hidden=True):
             help_topic = 'do_' + help_topic
-            if help_topic not in self.get_names():
+            if help_topic not in self.get_names(include_hidden=True):
                 cmd.Cmd.do_help(self, help_topic[3:])
                 return
 
@@ -271,7 +271,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         help_text = current_section = ''
-        headers = ['Syntax:', 'Examples:', 'Example:', 'Notes:', 'Caution:']
+        headers = ['Syntax:', 'Examples:', 'Example:', 'Notes:', 'Caution:', 'Arguments:']
         help_lines = textwrap.dedent(topic_docstring).split('\n')
 
         for line in help_lines:
@@ -283,10 +283,10 @@ class G2CmdShell(cmd.Cmd, object):
 
                 if current_section == 'Caution:':
                     line_color = 'caution, italics'
-                elif current_section not in ('Syntax:', 'Examples:', 'Example:'):
+                elif current_section not in ('Syntax:', 'Examples:', 'Example:', 'Notes:', 'Arguments:'):
                     line_color = ''
 
-            if help_topic[3:] in line and not line_color:
+            if re.match(f'^\s*{help_topic[3:]}', line) and not line_color:
                 sep_column = line.find(help_topic[3:]) + len(help_topic[3:])
                 help_text += line[0:sep_column] + colorize(line[sep_column:], 'dim') + '\n'
             else:
@@ -307,9 +307,9 @@ class G2CmdShell(cmd.Cmd, object):
         {colorize('organization.', '')}
 
         {colorize('Features are standardized and expressed in various ways to create candidate keys, and when candidates are found all', '')}
-        {colorize('of their features are compared to the incoming record''s features to see how close they actually are.', '')}
+        {colorize('of their features are compared to the features of the incoming record to see how close they actually are.', '')}
 
-        {colorize('Finally, a set of rules or "principles" are applied to each candidate record''s feature scores to see if the incoming', '')}
+        {colorize('Finally, a set of rules or "principles" are applied to the feature scores of each candidate to see if the incoming', '')}
         {colorize('record should resolve to an existing entity or become a new one. In either case, the rules are also used to create', '')}
         {colorize('relationships between entities.', '')}
 
@@ -389,7 +389,7 @@ class G2CmdShell(cmd.Cmd, object):
 
     def help_principles(self):
         print(textwrap.dedent(f'''
-        {colorize('Before the principles are applied, the features and expressions created for incoming records are used to find candidates.', '')}
+        {colorize('Before the principles are applied, the features and expressions created for an incoming record are used to find candidates.', '')}
         {colorize('An example of an expression is name and DOB and there is an expression call on the feature "name" to automatically create it', '')}
         {colorize('if both a name and DOB are present on the incoming record.  Features and expressions used for candidates are also referred', '')}
         {colorize('to as candidate builders or candidate keys.', '')}
@@ -428,9 +428,11 @@ class G2CmdShell(cmd.Cmd, object):
 
 # ===== Auto completion section =====
 
-    def get_names(self):
-        """Hide functions from available list of Commands. Separate help sections for some"""
-        return [n for n in dir(self.__class__)] # if n not in self.__hidden_methods]
+    def get_names(self, include_hidden=False):
+        """Override base method to return methods for autocomplete and help"""
+        if not include_hidden:
+            return [n for n in dir(self.__class__) if n not in self.__hidden_methods]
+        return [n for n in dir(self.__class__)]
 
     def completenames(self, text, *ignored):
         """Override function from cmd module to make command completion case insensitive"""
@@ -511,7 +513,7 @@ class G2CmdShell(cmd.Cmd, object):
             code_list.append(self.cfgData["G2_CONFIG"][table][i][field])
         return code_list
 
-    def complete_getConfigSection(self, text, line, begidx, endidx):
+    def complete_getConfigTable(self, text, line, begidx, endidx):
         return [section for section in self.cfgData["G2_CONFIG"].keys() if section.lower().startswith(text.lower())]
 
 
@@ -804,7 +806,7 @@ class G2CmdShell(cmd.Cmd, object):
         print(f'\n{output}\n')
 
 
-# ===== whole configuration =====
+# ===== json configuration file section =====
 
     def do_getDefaultConfigID(self, arg):
         """
@@ -837,7 +839,7 @@ class G2CmdShell(cmd.Cmd, object):
 
     def do_getConfigTable(self, arg):
         """
-        Returns the json configuration for a specific desired configuration table
+        Returns the json configuration for a specific configuration table
 
         Syntax:
             getConfigTable [table name]
@@ -853,6 +855,7 @@ class G2CmdShell(cmd.Cmd, object):
             self.do_help(sys._getframe(0).f_code.co_name)
             return
 
+        arg = arg.upper()
         if self.cfgData["G2_CONFIG"].get(arg):
             self.print_json_lines(self.cfgData["G2_CONFIG"][arg])
         else:
@@ -1125,10 +1128,10 @@ class G2CmdShell(cmd.Cmd, object):
         return None, f'Fragment "{fragment}" not found!'
 
     def lookupRule(self, rule):
-        erruleRecord = self.getRecord('CFG_ERRULE', 'ERRULE_CODE', rule)
+        erruleRecord = self.getRecord('CFG_ERRULE', 'ERRULE_ID', rule)
         if erruleRecord:
-            return erruleRecord, f'Rule "{rule}" already exists!'
-        return None, f'Fragment "{rule}" not found!'
+            return erruleRecord, f'Rule {rule} already exists!'
+        return None, f'Rule {rule} not found!'
 
     def required_parms(self, parm_dict, attr_list, **kwargs):
         test_type = kwargs.get('test_type', 'all').lower()
@@ -2353,7 +2356,7 @@ class G2CmdShell(cmd.Cmd, object):
                     colorize_msg(error_message, 'error')
                     return
                 else:
-                    ftypeRecord, update_cnt = self.update_if_different(erfragRecord, update_cnt, 'ERFRAG_SOURCE', 'source', parmData['SOURCE'])
+                    erfragRecord, update_cnt = self.update_if_different(erfragRecord, update_cnt, 'ERFRAG_SOURCE', 'source', parmData['SOURCE'])
                     erfragRecord['ERFRAG_DEPENDS'] = ','.join(dependencyList) if dependencyList else None
 
             elif parmCode == 'ID':
@@ -2459,6 +2462,62 @@ class G2CmdShell(cmd.Cmd, object):
                 "rtype_id": record["RTYPE_ID"],
                 "tier": record["ERRULE_TIER"]}
 
+    def validateRule(self, record):
+        errorList = []
+
+        if not isinstance(record['ERRULE_ID'], int):
+            errorList.append('ID must be an integer value!')
+
+        erfragRecord, message = self.lookupFragment(record['QUAL_ERFRAG_CODE'])
+        if not erfragRecord:
+            errorList.append(message)
+
+        if record.get('DISQ_ERFRAG_CODE'):
+            dqfragRecord, message = self.lookupFragment(record['DISQ_ERFRAG_CODE'])
+            if not dqfragRecord:
+                errorList.append(message)
+
+        record['RESOLVE'], message = self.validateDomain('resolve', record.get('RESOLVE', 'No'), ['Yes', 'No'])
+        if not record['RESOLVE']:
+            errorList.append(message)
+
+        record['RELATE'], message = self.validateDomain('relate', record.get('RELATE', 'No'), ['Yes', 'No'])
+        if not record['RELATE']:
+            errorList.append(message)
+
+        if record['RESOLVE'] == 'Yes' and record['RELATE'] == 'Yes':
+            errorList.append('A rule must either resolve or relate, not both!')
+
+        tier = record.get('ERRULE_TIER')
+        rtypeID = record.get('RTYPE_ID')
+
+        if record['RESOLVE'] == 'Yes':
+            if not tier:
+                errorList.append('A tier matching other rules that could be considered ambiguous to this one must be specified!')
+            elif not isinstance(tier, int):
+                errorList.append('The tier value must be an integer matching other rules that could be considered ambiguous to this one!')
+
+            if not rtypeID or (not isinstance(rtypeID, int)) or rtypeID != 1:
+                colorize_msg('Relationship type (RTYPE_ID) was forced to 1 for resolve rule!', 'caution')
+                record['RTYPE_ID'] = 1
+
+        if record['RELATE'] == 'Yes':
+            if tier:
+                errorList.append('A tier is not require for relate rules!')
+            if not rtypeID or (not isinstance(rtypeID, int)) or rtypeID not in (2, 3, 4):
+                errorList.append('Relationship type (RTYPE_ID) must be set to either 2=Possible match or 3=Possibly related for rules that relate!')
+
+        if record.get('REF_SCORE') and not isinstance(record['REF_SCORE'], int):
+            errorList.append('The reference score must be an integer value!')
+
+        if errorList:
+            print(colorize(f"\nThe following errors were detected:", 'bad'))
+            for message in errorList:
+                print(colorize(f"- {message}", 'bad'))
+            record = None
+
+        return record
+
     def do_addRule(self, arg):
         """
         Adds a new rule (aka principle)
@@ -2474,10 +2533,14 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
-            self.required_parms(parmData, ['RULE', 'FRAGMENT'])
-            parmData['ID'] = int(parmData.get('ID', 0))
+            self.required_parms(parmData, ['RULE', 'FRAGMENT', 'RESOLVE', 'RELATE', 'RTYPE_ID'])
             parmData['RULE'] = parmData['RULE'].upper()
             parmData['FRAGMENT'] = parmData['FRAGMENT'].upper()
+            if not parmData.get('ID'):
+                raise ValueError('ID is required to place rule in the order it should be tested!')
+            else:
+                parmData['ID'] = int(parmData['ID'])
+
         except (ValueError, KeyError) as err:
             colorize_msg(f'Syntax error: {err}', 'error')
             return
@@ -2488,66 +2551,25 @@ class G2CmdShell(cmd.Cmd, object):
 
         erruleID = self.checkDesiredRecordID('CFG_ERRULE', 'ERRULE_ID', parmData.get('ID'))
         if parmData.get('ID') and erruleID != parmData['ID']:
-            colorize_msg('The specified ID is already taken! Remove it to assign the next available', 'error')
+            colorize_msg('The specified ID is already taken!', 'error')
             return
-
-        erfragRecord, message = self.lookupFragment(parmData['FRAGMENT'])
-        if not erfragRecord:
-            colorize_msg(message, 'error')
-            return
-
-        if parmData.get('DISQUALIFIER'):
-            dqfragRecord, message = self.lookupFragment(parmData['DISQUALIFIER'])
-            if not dqfragRecord:
-                colorize_msg(message, 'error')
-                return
-
-        parmData['RESOLVE'], message = self.validateDomain('resolve', parmData.get('RESOLVE', 'No'), ['Yes', 'No'])
-        if not parmData['RESOLVE']:
-            colorize_msg(message, 'error')
-            return
-
-        parmData['RELATE'], message = self.validateDomain('relate', parmData.get('RELATE', 'No'), ['Yes', 'No'])
-        if not parmData['RELATE']:
-            colorize_msg(message, 'error')
-            return
-
-        if parmData['RESOLVE'] == 'Yes' and parmData['RELATE'] == 'Yes':
-            colorize_msg('A rule must resolve or relate, not both!', 'error')
-            return
-
-        tier = parmData.get('TIER')
-        if parmData['RESOLVE'] and not tier:
-            colorize_msg('A tier matching ohter rules that could be considered similar must be specified for resolve rules!', 'error')
-            return
-
-
-        #tier = parmData.get('TIER')
-        #if tier and not isinstance(parmData['TIER'], int):
-        #    colorize_msg('Tier must be specified', 'error')
-
-
-        if 'TIER' not in parmData or not parmData['TIER']:
-            parmData['TIER'] = None
-        else:
-            if not isinstance(parmData['TIER'], int) and parmData['TIER'].lower() != 'null':
-                try:
-                    parmData['TIER'] = int(parmData['TIER'])
-                except ValueError:
-                    colorize_msg(f'Tier value must be an integer', 'error')
-                    return
 
         newRecord = {}
-        newRecord['ERRULE_ID'] = int(parmData['ID'])
+        newRecord['ERRULE_ID'] = parmData['ID']
         newRecord['ERRULE_CODE'] = parmData['RULE']
-        newRecord['ERRULE_DESC'] = parmData['DESC'] if 'DESC' in parmData and parmData['DESC'] else parmData['RULE']
+        newRecord['ERRULE_DESC'] = parmData.get('DESC', parmData['RULE'])
         newRecord['RESOLVE'] = parmData['RESOLVE']
         newRecord['RELATE'] = parmData['RELATE']
-        newRecord['REF_SCORE'] = int(parmData['REF_SCORE'])
-        newRecord['RTYPE_ID'] = int(parmData['RTYPE_ID'])
+        newRecord['REF_SCORE'] = parmData.get('REF_SCORE', 0)
+        newRecord['RTYPE_ID'] = parmData['RTYPE_ID']
         newRecord['QUAL_ERFRAG_CODE'] = parmData['FRAGMENT']
-        newRecord['DISQ_ERFRAG_CODE'] = storeNullableJsonString(parmData['DISQUALIFIER'])
-        newRecord['ERRULE_TIER'] = parmData['TIER']
+        newRecord['DISQ_ERFRAG_CODE'] = parmData.get('DISQUALIFIER')
+        newRecord['ERRULE_TIER'] = parmData.get('TIER')
+
+        newRecord = self.validateRule(newRecord)
+        if not newRecord:
+            colorize_msg('Rule not added!', 'error')
+            return
 
         self.cfgData['G2_CONFIG']['CFG_ERRULE'].append(newRecord)
         self.configUpdated = True
@@ -2563,92 +2585,43 @@ class G2CmdShell(cmd.Cmd, object):
         Examples:
             setRule {"id": 111, "resolve": "No"}
             setRule {"id": 111, "relate": "Yes", "rtype_id": 2}
-
-        Notes:
-            You must at least specify the rule "id" you want to edit.  Then you can change the following settings:
-                - resolve
-                - relate
-                - rtype    <-this is the relationship type 1=Resolve, 2=Possible match, 3=Possibly related, 4=Name only
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
-
         try:
             parmData = dictKeysUpper(json.loads(arg))
-            parmData['ID'] = int(parmData['ID'])
-
+            self.required_parms(parmData, ['ID'])
         except (ValueError, KeyError) as err:
             colorize_msg(f'Syntax error: {err}', 'error')
             return
 
-        print()
-
-        # lookup rule and error if doesn't exist
-        listID = -1
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_ERRULE'])):
-            if self.cfgData['G2_CONFIG']['CFG_ERRULE'][i]['ERRULE_ID'] == parmData['ID']:
-                listID = i
-        if listID == -1:
-            colorize_msg('Rule %s does not exist!' % parmData['ID'])
+        oldRecord, message = self.lookupRule(parmData['ID'])
+        if not oldRecord:
+            colorize_msg(message, 'warning')
             return
 
-        if parmData.get('RESOLVE'):
-            if parmData['RESOLVE'].upper() not in ('YES', 'NO'):
-                colorize_msg('ERROR: Resolve should be Yes or No', 'B')
-                return
-            if parmData['RESOLVE'].upper() == 'YES':
-                parmData['RELATE'] = 'No'
-                parmData['RTYPE_ID'] = 1
+        # must use dict to create a new instance
+        newRecord = dict(oldRecord)
+        newRecord['ERRULE_CODE'] = parmData.get('RULE', newRecord['ERRULE_CODE'])
+        newRecord['ERRULE_DESC'] = parmData.get('DESC', newRecord['ERRULE_DESC'])
+        newRecord['RESOLVE'] = parmData.get('RESOLVE', newRecord['RESOLVE'])
+        newRecord['RELATE'] = parmData.get('RELATE', newRecord['RELATE'])
+        newRecord['REF_SCORE'] = parmData.get('REF_SCORE', newRecord['REF_SCORE'])
+        newRecord['RTYPE_ID'] = parmData.get('RTYPE_ID', newRecord['RTYPE_ID'])
+        newRecord['QUAL_ERFRAG_CODE'] = parmData.get('FRAGMENT', newRecord['QUAL_ERFRAG_CODE'])
+        newRecord['DISQ_ERFRAG_CODE'] = parmData.get('DISQUALIFIER', newRecord['DISQ_ERFRAG_CODE'])
+        newRecord['ERRULE_TIER'] = parmData.get('TIER', newRecord['ERRULE_TIER'])
 
-        if parmData.get('RELATE'):
-            if parmData['RELATE'].upper() not in ('YES', 'NO'):
-                colorize_msg('ERROR: Relate should be Yes or No', 'B')
-                return
-            if parmData['RELATE'].upper() == 'YES':
-                if parmData.get('RTYPE_ID'):
-                    if parmData.get('RTYPE_ID') not in (2,3,4):
-                        colorize_msg('ERROR: Relationship type (RTYPE_ID) must be 2 (possible match), 3 (possibly related) or 4 (name only)', 'B')
-                        return
-                elif self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RTYPE_ID'] == 1:
-                    parmData['RTYPE_ID'] = 2
+        newRecord = self.validateRule(newRecord)
+        if not newRecord:
+            colorize_msg('Rule not updated!', 'error')
+            return
 
-        if parmData.get('RULE'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['ERRULE_CODE'] = parmData['RULE']
-            colorize_msg('Rule code updated!')
-            self.configUpdated = True
-
-        if parmData.get('DESC'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['ERRULE_DESC'] = parmData['DESC']
-            colorize_msg('Rule description updated!')
-            self.configUpdated = True
-
-        if parmData.get('FRAGMENT'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['QUAL_ERFRAG_CODE'] = parmData['FRAGMENT']
-            colorize_msg('Rule fragment updated!')
-            self.configUpdated = True
-
-        if parmData.get('DISQUALIFIER'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['DISQ_ERFRAG_CODE'] = parmData['DISQUALIFIER']
-            colorize_msg('Rule disqualifier updated!')
-            self.configUpdated = True
-
-        if parmData.get('RESOLVE'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RESOLVE'] = parmData['RESOLVE'].capitalize()
-            colorize_msg('Rule resolve updated!')
-            self.configUpdated = True
-
-        if parmData.get('RELATE'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RELATE'] = parmData['RELATE'].capitalize()
-            colorize_msg('Rule relate updated!')
-            self.configUpdated = True
-
-        if parmData.get('RTYPE_ID'):
-            self.cfgData['G2_CONFIG']['CFG_ERRULE'][listID]['RTYPE_ID'] = parmData['RTYPE_ID']
-            colorize_msg('Relationship type (RTYPE_ID) updated!')
-            self.configUpdated = True
-
-        print()
+        self.cfgData['G2_CONFIG']['CFG_ERRULE'].remove(oldRecord)
+        self.cfgData['G2_CONFIG']['CFG_ERRULE'].append(newRecord)
+        colorize_msg(f'Successfully updated!', 'success')
+        self.configUpdated = True
 
     def do_listRules(self, arg):
         """
@@ -2925,7 +2898,7 @@ class G2CmdShell(cmd.Cmd, object):
 
             efbomData = {}
             efbomData['order'] = efbomRecord['EXEC_ORDER']
-            if efbomRecord['FTYPE_ID'] <= 0:
+            if efbomRecord['FTYPE_ID'] == 0:
                 efbomData['feature'] = 'parent'
             elif ftypeRecord3:
                 efbomData['feature'] = ftypeRecord3['FTYPE_CODE']
@@ -3023,18 +2996,21 @@ class G2CmdShell(cmd.Cmd, object):
             elementData = dictKeysUpper(elementData)
             execOrder += 1
 
-            bom_ftypeID = 0
-            if elementData.get('FEATURE') and elementData.get('FEATURE').upper() != 'PARENT':
-                bom_ftypeRecord, message = self.lookupFeature(elementData['FEATURE'].upper())
-                if not bom_ftypeRecord:
-                    colorize_msg(message, 'error')
-                    return
-                else:
-                    bom_ftypeID = bom_ftypeRecord['FTYPE_ID']
+            if elementData.get('FEATURELINK') == "parent":
+                bom_ftypeID = 0
+            else:
+                bom_ftypeID = -1
+                if elementData.get('FEATURE') and elementData.get('FEATURE').upper() != 'PARENT':
+                    bom_ftypeRecord, message = self.lookupFeature(elementData['FEATURE'].upper())
+                    if not bom_ftypeRecord:
+                        colorize_msg(message, 'error')
+                        return
+                    else:
+                        bom_ftypeID = bom_ftypeRecord['FTYPE_ID']
 
             bom_felemID = -1
             if elementData.get('ELEMENT') and elementData.get('ELEMENT').upper() != 'N/A':
-                if bom_ftypeID:
+                if bom_ftypeID > 0:
                     bom_felemRecord, message = self.lookupFeatureElement(elementData.get('FEATURE').upper(), elementData['ELEMENT'].upper())
                 else:
                     bom_felemRecord, message = self.lookupElement(elementData['ELEMENT'].upper())
@@ -3710,8 +3686,10 @@ class G2CmdShell(cmd.Cmd, object):
         if not arg or arg in 'BEHAVIORCODES':
             json_lines = []
             for code in self.valid_behavior_codes:
-                if code.startswith('NAME'):
+                if code == 'NAME':
                     desc = 'Controlled behavior used only for names'
+                elif code == 'NONE':
+                    desc = 'No behavior'
                 else:
                     if code.startswith('A1'):
                         desc = 'Absolutely 1'
