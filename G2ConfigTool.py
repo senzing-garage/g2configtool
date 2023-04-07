@@ -3035,8 +3035,6 @@ class G2CmdShell(cmd.Cmd, object):
             efbomRecord['EXEC_ORDER'] = execOrder
             efbomRecord['FELEM_REQ'] = elementData['REQUIRED']
             efbomRecordList.append(efbomRecord)
-            if self.doDebug:
-                debug(efbomRecord, 'EFBOM build')
 
         if len(efbomRecordList) == 0:
             colorize_msg('No elements were found in the elementList!', 'error')
@@ -3051,8 +3049,6 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['EFEAT_FTYPE_ID'] = efeatFTypeID
         newRecord['IS_VIRTUAL'] = parmData['ISVIRTUAL']
         self.cfgData['G2_CONFIG']['CFG_EFCALL'].append(newRecord)
-        if self.doDebug:
-            debug(newRecord)
         self.cfgData['G2_CONFIG']['CFG_EFBOM'].extend(efbomRecordList)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
@@ -3128,6 +3124,85 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_EFCALL'].remove(efcallRecord)
         colorize_msg(f'Successfully deleted!', 'success')
         self.configUpdated = True
+
+    def do_addExpressionElement(self, arg):
+        """
+        Add an additional feature/element to an existing expression call
+
+        Syntax:
+            addExpressionElement {json_configuration}
+
+        Example:
+            addExpressionElement {"call_id": 7, "feature": "ADDRESS", "element": "STR_NUM", "required": "No"}
+
+        Notes:
+            This command appends an additional feature and element to an existing expression call.  In the example above, the street number
+            computed by the address parser will be added to the list of composite keys created on names.
+        """
+        arg = self.check_arg_for_output_format(arg)
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
+            self.required_parms(parmData, ['CALL_ID', 'ELEMENT'])
+            parmData['CALL_ID'] = int(parmData.get('CALL_ID'))
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        efcallRecord = self.getRecord('CFG_EFCALL', 'EFCALL_ID', parmData['CALL_ID'])
+        if not efcallRecord:
+            colorize_msg(f"Expression call ID {parmData['CALL_ID']} does not exist", 'warning')
+            return
+
+        ftypeID = -1
+        if parmData.get('FEATURE'):
+            ftypeRecord, message = self.lookupFeature(parmData['FEATURE'].upper())
+            if not ftypeRecord:
+                colorize_msg(message, 'warning')
+                return
+            else:
+                ftypeID = ftypeRecord['FTYPE_ID']
+
+        if ftypeID < 0:
+            felemRecord, message = self.lookupElement(parmData['ELEMENT'])
+            if not felemRecord:
+                colorize_msg(message, 'warning')
+                return
+            else:
+                felemID = felemRecord['FELEM_ID']
+        else:
+            fbomRecord, message = self.lookupFeatureElement(parmData['FEATURE'], parmData['ELEMENT'])
+            if not fbomRecord:
+                colorize_msg(message, 'warning')
+                return
+            else:
+                felemID = fbomRecord['FELEM_ID']
+
+        parmData['REQUIRED'], message = self.validateDomain('Required', parmData.get('REQUIRED', 'No'), ['Yes', 'No'])
+        if not parmData['REQUIRED']:
+            colorize_msg(message, 'error')
+            return
+
+        lastOrder = 0
+        for efbomRecord in self.getRecordList('CFG_EFBOM', 'EFCALL_ID', parmData['CALL_ID']):
+            if efbomRecord['FTYPE_ID'] == ftypeID and efbomRecord['FELEM_ID'] == felemID:
+                colorize_msg('Feature/element already added to name hasher', 'warning')
+                return
+            if efbomRecord['EXEC_ORDER'] > lastOrder:
+                lastOrder = efbomRecord['EXEC_ORDER']
+
+        newRecord = {}
+        newRecord['EFCALL_ID'] = parmData['CALL_ID']
+        newRecord['EXEC_ORDER'] = lastOrder + 1
+        newRecord['FTYPE_ID'] = ftypeID
+        newRecord['FELEM_ID'] = felemID
+        newRecord['FELEM_REQ'] = parmData['REQUIRED']
+        self.cfgData['G2_CONFIG']['CFG_EFBOM'].append(newRecord)
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+
 
     # convenience functions
 
