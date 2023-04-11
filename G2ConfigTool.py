@@ -3125,229 +3125,6 @@ class G2CmdShell(cmd.Cmd, object):
         colorize_msg(f'Successfully deleted!', 'success')
         self.configUpdated = True
 
-    def do_addExpressionElement(self, arg):
-        """
-        Add an additional feature/element to an existing expression call
-
-        Syntax:
-            addExpressionElement {json_configuration}
-
-        Example:
-            addExpressionElement {"call_id": 7, "feature": "ADDRESS", "element": "STR_NUM", "required": "No"}
-
-        Notes:
-            This command appends an additional feature and element to an existing expression call.  In the example above, the street number
-            computed by the address parser will be added to the list of composite keys created on names.
-        """
-        arg = self.check_arg_for_output_format(arg)
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
-            self.required_parms(parmData, ['CALL_ID', 'ELEMENT'])
-            parmData['CALL_ID'] = int(parmData.get('CALL_ID'))
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
-            return
-
-        efcallRecord = self.getRecord('CFG_EFCALL', 'EFCALL_ID', parmData['CALL_ID'])
-        if not efcallRecord:
-            colorize_msg(f"Expression call ID {parmData['CALL_ID']} does not exist", 'warning')
-            return
-
-        ftypeID = -1
-        if parmData.get('FEATURE'):
-            ftypeRecord, message = self.lookupFeature(parmData['FEATURE'].upper())
-            if not ftypeRecord:
-                colorize_msg(message, 'warning')
-                return
-            else:
-                ftypeID = ftypeRecord['FTYPE_ID']
-
-        if ftypeID < 0:
-            felemRecord, message = self.lookupElement(parmData['ELEMENT'])
-            if not felemRecord:
-                colorize_msg(message, 'warning')
-                return
-            else:
-                felemID = felemRecord['FELEM_ID']
-        else:
-            fbomRecord, message = self.lookupFeatureElement(parmData['FEATURE'], parmData['ELEMENT'])
-            if not fbomRecord:
-                colorize_msg(message, 'warning')
-                return
-            else:
-                felemID = fbomRecord['FELEM_ID']
-
-        parmData['REQUIRED'], message = self.validateDomain('Required', parmData.get('REQUIRED', 'No'), ['Yes', 'No'])
-        if not parmData['REQUIRED']:
-            colorize_msg(message, 'error')
-            return
-
-        lastOrder = 0
-        for efbomRecord in self.getRecordList('CFG_EFBOM', 'EFCALL_ID', parmData['CALL_ID']):
-            if efbomRecord['FTYPE_ID'] == ftypeID and efbomRecord['FELEM_ID'] == felemID:
-                colorize_msg('Feature/element already added to name hasher', 'warning')
-                return
-            if efbomRecord['EXEC_ORDER'] > lastOrder:
-                lastOrder = efbomRecord['EXEC_ORDER']
-
-        newRecord = {}
-        newRecord['EFCALL_ID'] = parmData['CALL_ID']
-        newRecord['EXEC_ORDER'] = lastOrder + 1
-        newRecord['FTYPE_ID'] = ftypeID
-        newRecord['FELEM_ID'] = felemID
-        newRecord['FELEM_REQ'] = parmData['REQUIRED']
-        self.cfgData['G2_CONFIG']['CFG_EFBOM'].append(newRecord)
-        self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
-
-
-    # convenience functions
-
-    def do_addToNamehash(self, arg):
-        """
-        Add a new feature element to the list composite name keys
-
-        Syntax:
-            addToNamehash {"feature": "<feature>", "element": "<element>"}
-
-        Example:
-            addToNamehash {"feature": "ADDRESS", "element": "STR_NUM"}
-
-        Notes:
-            This command appends an attribute from another feature to the name hash.  In the example above, the street number
-            computed by the address parser will be added to the list of composite keys created from name.
-        """
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"FEATURE": arg}
-            self.required_parms(parmData, ['ELEMENT'])
-            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
-            return
-
-        try:
-            nameHasher_efuncID = self.getRecord('CFG_EFUNC', 'EFUNC_CODE', 'NAME_HASHER')['EFUNC_ID']
-            nameHasher_efcallID = self.getRecord('CFG_EFCALL', 'EFUNC_ID', nameHasher_efuncID)['EFCALL_ID']
-        except Exception:
-            nameHasher_efcallID = 0
-        if not nameHasher_efcallID:
-            colorize_msg('Name hasher function call not found!', 'error')
-            return
-
-        ftypeID = -1
-        if parmData.get('FEATURE'):
-            ftypeRecord, message = self.lookupFeature(parmData['FEATURE'].upper())
-            if not ftypeRecord:
-                colorize_msg(message, 'warning')
-                return
-            else:
-                ftypeID = ftypeRecord['FTYPE_ID']
-
-        if ftypeID < 0:
-            felemRecord, message = self.lookupElement(parmData['ELEMENT'])
-            if not felemRecord:
-                colorize_msg(message, 'warning')
-                return
-            else:
-                felemID = felemRecord['FELEM_ID']
-        else:
-            fbomRecord, message = self.lookupFeatureElement(parmData['FEATURE'], parmData['ELEMENT'])
-            if not fbomRecord:
-                colorize_msg(message, 'warning')
-                return
-            else:
-                felemID = fbomRecord['FELEM_ID']
-
-        lastOrder = 0
-        for efbomRecord in self.getRecordList('CFG_EFBOM', 'EFCALL_ID', nameHasher_efcallID):
-            if efbomRecord['FTYPE_ID'] == ftypeID and efbomRecord['FELEM_ID'] == felemID:
-                colorize_msg('Feature/element already added to name hasher', 'warning')
-                return
-            if efbomRecord['EXEC_ORDER'] > lastOrder:
-                lastOrder = efbomRecord['EXEC_ORDER']
-
-        newRecord = {}
-        newRecord['EFCALL_ID'] = nameHasher_efcallID
-        newRecord['EXEC_ORDER'] = lastOrder + 1
-        newRecord['FTYPE_ID'] = ftypeID
-        newRecord['FELEM_ID'] = felemID
-        newRecord['FELEM_REQ'] = 'No'
-        self.cfgData['G2_CONFIG']['CFG_EFBOM'].append(newRecord)
-        self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
-        if self.doDebug:
-            debug(newRecord, 'EFBOM build')
-
-    def do_deleteFromNamehash(self, arg):
-        """
-        Delete a feature element from the list composite name keys
-
-        Syntax:
-            deleteFromNamehash {"feature": "<feature>", "element": "<element>"}
-
-        Example:
-            deleteFromNamehash {"feature": "ADDRESS", "element": "STR_NUM"}
-        """
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"FEATURE": arg}
-            self.required_parms(parmData, ['ELEMENT'])
-            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
-            return
-
-        try:
-            nameHasher_efuncID = self.getRecord('CFG_EFUNC', 'EFUNC_CODE', 'NAME_HASHER')['EFUNC_ID']
-            nameHasher_efcallID = self.getRecord('CFG_EFCALL', 'EFUNC_ID', nameHasher_efuncID)['EFCALL_ID']
-        except Exception:
-            nameHasher_efcallID = 0
-        if not nameHasher_efcallID:
-            colorize_msg('Name hasher function call not found!', 'error')
-            return
-
-        ftypeID = -1
-        if parmData.get('FEATURE'):
-            ftypeRecord, message = self.lookupFeature(parmData['FEATURE'].upper())
-            if not ftypeRecord:
-                colorize_msg(message, 'error')
-                return
-            else:
-                ftypeID = ftypeRecord['FTYPE_ID']
-
-        if ftypeID < 0:
-            felemRecord, message = self.lookupElement(parmData['ELEMENT'])
-            if not felemRecord:
-                colorize_msg(message, 'error')
-                return
-            else:
-                felemID = felemRecord['FELEM_ID']
-        else:
-            fbomRecord, message = self.lookupFeatureElement(parmData['FEATURE'], parmData['ELEMENT'])
-            if not fbomRecord:
-                colorize_msg(message, 'error')
-                return
-            else:
-                felemID = fbomRecord['FELEM_ID']
-
-        for efbomRecord in self.getRecordList('CFG_EFBOM', 'EFCALL_ID', nameHasher_efcallID):
-            if efbomRecord['FTYPE_ID'] == ftypeID and efbomRecord['FELEM_ID'] == felemID:
-                self.cfgData['G2_CONFIG']['CFG_EFBOM'].remove(efbomRecord)
-                colorize_msg(f'Successfully deleted!', 'success')
-                self.configUpdated = True
-                return
-
-        colorize_msg('Feature/element not found in the name hasher', 'warning')
-
 # ===== comparison call commands =====
 
     def formatComparisonCallJson(self, cfcallRecord):
@@ -3539,7 +3316,7 @@ class G2CmdShell(cmd.Cmd, object):
 
 # ===== distinctness call commands =====
 
-    def formatDistinctnessCallJson(self, dfcallRecord):
+    def formatDistinctCallJson(self, dfcallRecord):
         dfcallID = dfcallRecord['DFCALL_ID']
         ftypeRecord1 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', dfcallRecord['FTYPE_ID'])
         dfuncRecord = self.getRecord('CFG_DFUNC', 'DFUNC_ID', dfcallRecord['DFUNC_ID'])
@@ -3562,15 +3339,15 @@ class G2CmdShell(cmd.Cmd, object):
 
         return dfcallData
 
-    def do_addDistinctnessCall(self, arg):
+    def do_addDistinctCall(self, arg):
         """
         Add a new distinctness call
 
         Syntax:
-            addDistinctnessCall {json_configuration}
+            addDistinctCall {json_configuration}
 
         Examples:
-            see listDistinctnessCalls or getDistinctnessCall for examples of json_configurations
+            see listDistinctCalls or getDistinctCall for examples of json_configurations
         """
 
         if not arg:
@@ -3654,30 +3431,30 @@ class G2CmdShell(cmd.Cmd, object):
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
 
-    def do_listDistinctnessCalls(self, arg):
+    def do_listDistinctCalls(self, arg):
         """
         Returns the list of distinctness calls
 
         Syntax:
-            listDistinctnessCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listDistinctCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
 
         json_lines = []
         for dfcallRecord in sorted(self.getRecordList('CFG_DFCALL'), key=lambda k: (k['FTYPE_ID'], k['EXEC_ORDER'])):
-            dfcallJson = self.formatDistinctnessCallJson(dfcallRecord)
+            dfcallJson = self.formatDistinctCallJson(dfcallRecord)
             if arg and arg.lower() not in str(dfcallJson).lower():
                 continue
             json_lines.append(dfcallJson)
 
         self.print_json_lines(json_lines)
 
-    def do_getDistinctnessCall(self, arg):
+    def do_getDistinctCall(self, arg):
         """
         Returns a single distinctness call
 
         Syntax:
-            getDistinctnessCall [id] [optional_output_format = table, json or jsonl]
+            getDistinctCall [id] [optional_output_format = table, json or jsonl]
         """
         arg = self.check_arg_for_output_format(arg)
         if not arg:
@@ -3695,14 +3472,14 @@ class G2CmdShell(cmd.Cmd, object):
         if not dfcallRecord:
             colorize_msg(f"Distinctness call ID {parmData['ID']} does not exist", 'warning')
             return
-        self.print_json_record(self.formatDistinctnessCallJson(dfcallRecord))
+        self.print_json_record(self.formatDistinctCallJson(dfcallRecord))
 
-    def do_deleteDistinctnessCall(self, arg):
+    def do_deleteDistinctCall(self, arg):
         """
         Deletes a distintness call
 
         Syntax:
-            deleteDistinctnessCall [id]
+            deleteDistinctCall [id]
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -3725,6 +3502,293 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_DFCALL'].remove(dfcallRecord)
         colorize_msg(f'Successfully deleted!', 'success')
         self.configUpdated = True
+
+# ===== add/delete call elements =====
+
+    def prepCallElement(self, arg):
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['CALL_TYPE', 'CALL_ID', 'ELEMENT'])
+            parmData['CALL_ID'] = int(parmData.get('CALL_ID'))
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return None
+
+        parmData['CALL_TYPE'], message = self.validateDomain('Call type', parmData.get('CALL_TYPE'), ['expression', 'comparison', 'distinct'])
+        if not parmData['CALL_TYPE']:
+            return {'error': message}
+
+        if parmData['CALL_TYPE'] == 'expression':
+            call_table = 'CFG_EFCALL'
+            bom_table = 'CFG_EFBOM'
+            id_field = 'EFCALL_ID'
+        elif parmData['CALL_TYPE'] == 'comparison':
+            call_table = 'CFG_CFCALL'
+            bom_table = 'CFG_CFBOM'
+            id_field = 'CFCALL_ID'
+        elif parmData['CALL_TYPE'] == 'cistinct':
+            call_table = 'CFG_DFCALL'
+            bom_table = 'CFG_DFBOM'
+            id_field = 'DFCALL_ID'
+
+        callRecord = self.getRecord(call_table, id_field, parmData['CALL_ID'])
+        if not callRecord:
+            return {'error': f"Call ID {parmData['CALL_ID']} does not exist"}
+
+        ftypeID = -1
+        if parmData.get('FEATURE'):
+            ftypeRecord, message = self.lookupFeature(parmData['FEATURE'].upper())
+            if not ftypeRecord:
+                return {'error': message}
+            else:
+                ftypeID = ftypeRecord['FTYPE_ID']
+
+        if ftypeID < 0:
+            felemRecord, message = self.lookupElement(parmData['ELEMENT'])
+            if not felemRecord:
+                return {'error': message}
+            else:
+                felemID = felemRecord['FELEM_ID']
+        else:
+            fbomRecord, message = self.lookupFeatureElement(parmData['FEATURE'], parmData['ELEMENT'])
+            if not fbomRecord:
+                return {'error': message}
+            else:
+                felemID = fbomRecord['FELEM_ID']
+
+        required, message = self.validateDomain('Required', parmData.get('REQUIRED', 'No'), ['Yes', 'No'])
+        if not required:
+            return {'error': message}
+
+        foundRecord = None
+        lastOrder = 0
+        for bomRecord in self.getRecordList(bom_table, id_field, parmData['CALL_ID']):
+            if bomRecord['FTYPE_ID'] == ftypeID and bomRecord['FELEM_ID'] == felemID:
+                foundRecord = bomRecord
+                break
+            if bomRecord['EXEC_ORDER'] > lastOrder:
+                lastOrder = bomRecord['EXEC_ORDER']
+
+        callElementData = {'call_type': parmData['CALL_TYPE'],
+                           'call_table': call_table,
+                           'bom_table': bom_table,
+                           'id_field': id_field,
+                           'call_id': parmData['CALL_ID'],
+                           'ftypeID': ftypeID,
+                           'felemID': felemID,
+                           'required': required,
+                           'bomRecord': foundRecord,
+                           'lastOrder': lastOrder}
+        return callElementData
+
+    def do_addCallElement(self, arg):
+        """
+        Add an additional feature/element to an existing expression, comparison or distinct call
+
+        Syntax:
+            addCallElement {json_configuration}
+
+        Example:
+            addCallElement {"call_type": "expression", "call_id": 7, "feature": "ADDRESS", "element": "STR_NUM", "required": "No"}
+
+        Notes:
+            This command appends an additional feature and element to an existing expression call.  In the example above, the street number
+            computed by the address parser will be added to the list of composite keys created on names.
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        callElementData = self.prepCallElement(arg)
+        if callElementData.get('error'):
+            colorize_msg(callElementData['error'], 'error')
+            return
+        if callElementData['bomRecord']:
+            colorize_msg('Feature/element already exists for call', 'caution')
+            return
+
+        newRecord = {}
+        newRecord[callElementData['id_field']] = callElementData['call_id']
+        newRecord['EXEC_ORDER'] = callElementData['lastOrder'] + 1
+        newRecord['FTYPE_ID'] = callElementData['ftypeID']
+        newRecord['FELEM_ID'] = callElementData['felemID']
+        if callElementData['bom_table'] == 'CFG_EFBOM':
+            newRecord['FELEM_REQ'] = callElementData['required']
+
+        self.cfgData['G2_CONFIG'][callElementData['bom_table']].append(newRecord)
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+
+    def do_deleteCallElement(self, arg):
+        """
+        Delete a feature/element from an existing expression, comparison or distinct call
+
+        Syntax:
+            deleteCallElement {json_configuration}
+
+        Example:
+            deleteCallElement {"call_type": "expression", "call_id": 7, "feature": "ADDRESS", "element": "STR_NUM"}
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        callElementData = self.prepCallElement(arg)
+        if callElementData.get('error'):
+            colorize_msg(callElementData['error'], 'error')
+            return
+        if not callElementData['bomRecord']:
+            colorize_msg('Feature/element not found for call', 'caution')
+            return
+
+        self.cfgData['G2_CONFIG'][callElementData['bom_table']].remove(callElementData['bomRecord'])
+        colorize_msg(f'Successfully deleted!', 'success')
+        self.configUpdated = True
+
+    # convenience functions
+
+    def do_addToNamehash(self, arg):
+        """
+        Add a new feature element to the list composite name keys
+
+        Syntax:
+            addToNamehash {"feature": "<feature>", "element": "<element>"}
+
+        Example:
+            addToNamehash {"feature": "ADDRESS", "element": "STR_NUM"}
+
+        Notes:
+            This command appends an attribute from another feature to the name hash.  In the example above, the street number
+            computed by the address parser will be added to the list of composite keys created from name.
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"FEATURE": arg}
+            self.required_parms(parmData, ['ELEMENT'])
+            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        try:
+            nameHasher_efuncID = self.getRecord('CFG_EFUNC', 'EFUNC_CODE', 'NAME_HASHER')['EFUNC_ID']
+            nameHasher_efcallID = self.getRecord('CFG_EFCALL', 'EFUNC_ID', nameHasher_efuncID)['EFCALL_ID']
+        except Exception:
+            nameHasher_efcallID = 0
+        if not nameHasher_efcallID:
+            colorize_msg('Name hasher function call not found!', 'error')
+            return
+
+        ftypeID = -1
+        if parmData.get('FEATURE'):
+            ftypeRecord, message = self.lookupFeature(parmData['FEATURE'].upper())
+            if not ftypeRecord:
+                colorize_msg(message, 'warning')
+                return
+            else:
+                ftypeID = ftypeRecord['FTYPE_ID']
+
+        if ftypeID < 0:
+            felemRecord, message = self.lookupElement(parmData['ELEMENT'])
+            if not felemRecord:
+                colorize_msg(message, 'warning')
+                return
+            else:
+                felemID = felemRecord['FELEM_ID']
+        else:
+            fbomRecord, message = self.lookupFeatureElement(parmData['FEATURE'], parmData['ELEMENT'])
+            if not fbomRecord:
+                colorize_msg(message, 'warning')
+                return
+            else:
+                felemID = fbomRecord['FELEM_ID']
+
+        lastOrder = 0
+        for efbomRecord in self.getRecordList('CFG_EFBOM', 'EFCALL_ID', nameHasher_efcallID):
+            if efbomRecord['FTYPE_ID'] == ftypeID and efbomRecord['FELEM_ID'] == felemID:
+                colorize_msg('Feature/element already added to name hasher', 'warning')
+                return
+            if efbomRecord['EXEC_ORDER'] > lastOrder:
+                lastOrder = efbomRecord['EXEC_ORDER']
+
+        newRecord = {}
+        newRecord['EFCALL_ID'] = nameHasher_efcallID
+        newRecord['EXEC_ORDER'] = lastOrder + 1
+        newRecord['FTYPE_ID'] = ftypeID
+        newRecord['FELEM_ID'] = felemID
+        newRecord['FELEM_REQ'] = 'No'
+        self.cfgData['G2_CONFIG']['CFG_EFBOM'].append(newRecord)
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+        if self.doDebug:
+            debug(newRecord, 'EFBOM build')
+
+    def do_deleteFromNamehash(self, arg):
+        """
+        Delete a feature element from the list composite name keys
+
+        Syntax:
+            deleteFromNamehash {"feature": "<feature>", "element": "<element>"}
+
+        Example:
+            deleteFromNamehash {"feature": "ADDRESS", "element": "STR_NUM"}
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"FEATURE": arg}
+            self.required_parms(parmData, ['ELEMENT'])
+            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        try:
+            nameHasher_efuncID = self.getRecord('CFG_EFUNC', 'EFUNC_CODE', 'NAME_HASHER')['EFUNC_ID']
+            nameHasher_efcallID = self.getRecord('CFG_EFCALL', 'EFUNC_ID', nameHasher_efuncID)['EFCALL_ID']
+        except Exception:
+            nameHasher_efcallID = 0
+        if not nameHasher_efcallID:
+            colorize_msg('Name hasher function call not found!', 'error')
+            return
+
+        ftypeID = -1
+        if parmData.get('FEATURE'):
+            ftypeRecord, message = self.lookupFeature(parmData['FEATURE'].upper())
+            if not ftypeRecord:
+                colorize_msg(message, 'error')
+                return
+            else:
+                ftypeID = ftypeRecord['FTYPE_ID']
+
+        if ftypeID < 0:
+            felemRecord, message = self.lookupElement(parmData['ELEMENT'])
+            if not felemRecord:
+                colorize_msg(message, 'error')
+                return
+            else:
+                felemID = felemRecord['FELEM_ID']
+        else:
+            fbomRecord, message = self.lookupFeatureElement(parmData['FEATURE'], parmData['ELEMENT'])
+            if not fbomRecord:
+                colorize_msg(message, 'error')
+                return
+            else:
+                felemID = fbomRecord['FELEM_ID']
+
+        for efbomRecord in self.getRecordList('CFG_EFBOM', 'EFCALL_ID', nameHasher_efcallID):
+            if efbomRecord['FTYPE_ID'] == ftypeID and efbomRecord['FELEM_ID'] == felemID:
+                self.cfgData['G2_CONFIG']['CFG_EFBOM'].remove(efbomRecord)
+                colorize_msg(f'Successfully deleted!', 'success')
+                self.configUpdated = True
+                return
+
+        colorize_msg('Feature/element not found in the name hasher', 'warning')
+
 
 
 # ===== supporting codes =====
