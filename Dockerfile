@@ -1,7 +1,7 @@
-ARG BASE_IMAGE=senzing/senzingapi-tools:3.5.2
+ARG BASE_IMAGE=senzing/senzingapi-tools:3.5.3
 FROM ${BASE_IMAGE}
 
-ENV REFRESHED_AT=2023-05-09
+ENV REFRESHED_AT=2023-06-15
 
 LABEL Name="senzing/g2configtool" \
       Maintainer="support@senzing.com" \
