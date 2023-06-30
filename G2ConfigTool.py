@@ -22,11 +22,7 @@ except (ImportError, ModuleNotFoundError):
 
 import G2Paths
 from G2IniParams import G2IniParams
-
-try:
-    from senzing import G2Config, G2ConfigMgr, G2Exception, G2ModuleGenericException
-except Exception:
-    pass
+from senzing import G2Config, G2ConfigMgr, G2Exception, G2ModuleGenericException
 
 try:
     import readline
@@ -36,11 +32,13 @@ except ImportError:
 
 try:
     from pygments import highlight, lexers, formatters
+    pygmentsInstalled = True
 except ImportError:
-    pass
+    pygmentsInstalled = False
 
 # ===== supporting classes =====
 
+# ==============================
 class Colors:
 
     @classmethod
@@ -54,19 +52,19 @@ class Colors:
 
     @classmethod
     def set_theme(cls, theme):
+        # best for dark backgrounds
         if theme.upper() == 'DEFAULT':
             cls.TABLE_TITLE = cls.FG_GREY42
             cls.ROW_TITLE = cls.FG_GREY42
             cls.COLUMN_HEADER = cls.FG_GREY42
             cls.ENTITY_COLOR = cls.FG_MEDIUMORCHID1
             cls.DSRC_COLOR = cls.FG_ORANGERED1
-            cls.ATTR_COLOR = cls.FG_SYSTEMBLUE
+            cls.ATTR_COLOR = cls.FG_CORNFLOWERBLUE
             cls.GOOD = cls.FG_CHARTREUSE3
             cls.BAD = cls.FG_RED3
             cls.CAUTION = cls.FG_GOLD3
             cls.HIGHLIGHT1 = cls.FG_DEEPPINK4
             cls.HIGHLIGHT2 = cls.FG_DEEPSKYBLUE1
-        # best for dark backgrounds
         elif theme.upper() == 'LIGHT':
             cls.TABLE_TITLE = cls.FG_LIGHTBLACK
             cls.ROW_TITLE = cls.FG_LIGHTBLACK
@@ -79,7 +77,6 @@ class Colors:
             cls.CAUTION = cls.FG_LIGHTYELLOW
             cls.HIGHLIGHT1 = cls.FG_LIGHTMAGENTA
             cls.HIGHLIGHT2 = cls.FG_LIGHTCYAN
-        # best for light backgrounds
         elif theme.upper() == 'DARK':
             cls.TABLE_TITLE = cls.FG_LIGHTBLACK
             cls.ROW_TITLE = cls.FG_LIGHTBLACK
@@ -152,6 +149,7 @@ class Colors:
     FG_CORNFLOWERBLUE = '\033[38;5;69m'
     FG_HOTPINK = '\033[38;5;206m'
     FG_DEEPPINK4 = '\033[38;5;89m'
+    FG_MAGENTA3 = '\033[38;5;164m'
     FG_SALMON = '\033[38;5;209m'
     FG_MEDIUMORCHID1 = '\033[38;5;207m'
     FG_NAVAJOWHITE3 = '\033[38;5;144m'
@@ -235,8 +233,11 @@ class G2CmdShell(cmd.Cmd, object):
         self.doDebug = debug
 
         # Setup for pretty printing
+        Colors.set_theme('DEFAULT')
         self.pygmentsInstalled = True if 'pygments' in sys.modules else False
-        self.current_output_format = 'table' if prettytable else 'jsonl'
+        #self.current_output_format = 'table' if prettytable else 'jsonl'
+        self.current_output_format_list = 'table' if prettytable else 'jsonl'
+        self.current_output_format_record = 'json'
 
         # Readline and history
         self.readlineAvail = True if 'readline' in sys.modules else False
@@ -248,8 +249,6 @@ class G2CmdShell(cmd.Cmd, object):
 
         getConfig_parser = self.subparsers.add_parser('getConfig', usage=argparse.SUPPRESS)
         getConfig_parser.add_argument('configID', type=int)
-
-        Colors.set_theme('DEFAULT')
 
 # ===== custom help section =====
 
@@ -829,7 +828,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             getConfigList [optional_output_format]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('record', arg)
         try:
             response = bytearray()
             self.g2_configmgr.getConfigList(response)
@@ -850,7 +849,7 @@ class G2CmdShell(cmd.Cmd, object):
         Caution:
             These listings will only be understood by Senzing engineers
         """
-        arg = self.check_arg_for_output_format(arg) # checking for list here even though a get as it
+        arg = self.check_arg_for_output_format('record', arg) # checking for list here even though a get as it
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -937,23 +936,27 @@ class G2CmdShell(cmd.Cmd, object):
 
 # ===== settings section =====
 
-    def do_setOutputFormat(self, arg):
+    def do_setTheme(self, arg):
         """
+        Switch terminal ANSI colors between default, light and dark
+
         Syntax:
-            setOutputFormat [table|jsonl|json]
+            setTheme {default|light|dark}
         """
         if not arg:
-            colorize_msg(f'current format is {self.current_output_format}', 'info')
+            self.do_help(sys._getframe(0).f_code.co_name)
             return
-        if arg.lower() not in ('table', 'json', 'jsonl'):
-            colorize_msg(f'format must be table, json (tall json) or jsonl (json lines)', 'error')
-        elif arg.lower() == 'table' and not prettytable:
-            colorize_msg('\nPlease install python pretty table to use this option (pip3 install prettytable)\n', 'warning')
-        else:
-            self.current_output_format = arg.lower()
-            print()
 
-    def check_arg_for_output_format(self, arg):
+        theme = arg.upper()
+        theme, message = self.validateDomain('Theme', theme, ['DEFAULT', 'DARK', 'LIGHT'])
+        if not theme:
+            colorize_msg(message, 'error')
+            return
+
+        Colors.set_theme(theme)
+
+    def check_arg_for_output_format(self, output_type, arg):
+
         if not arg:
             return arg
         new_arg = []
@@ -962,7 +965,10 @@ class G2CmdShell(cmd.Cmd, object):
                 colorize_msg('\nOutput to table ignored as prettytable not installed (pip3 install prettytable)\n', 'warning')
                 arg = arg.replace(token, '')
             elif token.lower() in ('table', 'json', 'jsonl'):
-                self.current_output_format = token.lower()
+                if output_type == 'list':
+                    self.current_output_format_list = token.lower()
+                else:
+                    self.current_output_format_record = token.lower()
                 arg = arg.replace(token, '')
             else:
                 new_arg.append(token)
@@ -1256,7 +1262,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listDataSources [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
         for dsrcRecord in sorted(self.getRecordList('CFG_DSRC'), key=lambda k: k['DSRC_ID']):
             if arg and arg.lower() not in str(dsrcRecord).lower():
@@ -1804,7 +1810,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listFeatures [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
         for ftypeRecord in sorted(self.getRecordList('CFG_FTYPE'), key=lambda k: k['FTYPE_ID']):
             featureJson = self.formatFeatureJson(ftypeRecord)
@@ -1821,7 +1827,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             getFeature [code or id] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('record', arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -1998,7 +2004,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listAttributes [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
         for attrRecord in sorted(self.getRecordList('CFG_ATTR'), key=lambda k: k['ATTR_ID']):
             if arg and arg.lower() not in str(attrRecord).lower():
@@ -2018,7 +2024,7 @@ class G2CmdShell(cmd.Cmd, object):
             If you specify a valid feature, all of its attributes will be displayed
                 try: getAttribute PASSPORT
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('record', arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -2386,7 +2392,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listFragments [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
 
         json_lines = []
         for fragmentRecord in sorted(self.getRecordList('CFG_ERFRAG'), key=lambda k: k['ERFRAG_ID']):
@@ -2404,7 +2410,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             getFragment [code or id] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('record', arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -2637,7 +2643,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listRules [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
 
         json_lines = []
         for ruleRecord in sorted(self.getRecordList('CFG_ERRULE'), key=lambda k: k['ERRULE_ID']):
@@ -2655,7 +2661,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             getRule [code or id] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('record', arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -2803,7 +2809,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listStandardizationCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
 
         json_lines = []
         for sfcallRecord in sorted(self.getRecordList('CFG_SFCALL'), key=lambda k: (k['FTYPE_ID'], k['EXEC_ORDER'])):
@@ -2821,7 +2827,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             getStandardizationCall [id] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('record', arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -3067,7 +3073,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listExpressionCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
 
         json_lines = []
         for efcallRecord in sorted(self.getRecordList('CFG_EFCALL'), key=lambda k: (k['FTYPE_ID'], k['FELEM_ID'], k['EXEC_ORDER'])):
@@ -3085,7 +3091,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             getExpressionCall [id] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('record', arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -3255,7 +3261,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listComparisonCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
 
         json_lines = []
         for cfcallRecord in sorted(self.getRecordList('CFG_CFCALL'), key=lambda k: (k['FTYPE_ID'], k['EXEC_ORDER'])):
@@ -3273,7 +3279,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             getComparisonCall [id] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('record', arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -3445,7 +3451,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listDistinctCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
 
         json_lines = []
         for dfcallRecord in sorted(self.getRecordList('CFG_DFCALL'), key=lambda k: (k['FTYPE_ID'], k['EXEC_ORDER'])):
@@ -3463,7 +3469,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             getDistinctCall [id] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('record', arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -3680,6 +3686,9 @@ class G2CmdShell(cmd.Cmd, object):
         """
         Add an additional feature/element to the list composite name keys
 
+        Syntax:
+            addToNamehash {"feature": "<feature>", "element": "<element>"}
+
         Example:
             addToNamehash {"feature": "ADDRESS", "element": "STR_NUM"}
 
@@ -3737,6 +3746,180 @@ class G2CmdShell(cmd.Cmd, object):
         self.do_deleteCallElement(json.dumps(parmData))
 
 
+# ===== generic threshold commands =====
+
+    def formatGenericThresholdJson(self, thresholdRecord):
+        if thresholdRecord.get("FTYPE_ID", 0) != 0:
+            ftypeCode = self.getRecord("CFG_FTYPE", "FTYPE_ID", thresholdRecord["FTYPE_ID"])["FTYPE_CODE"]
+        else:
+            ftypeCode = 'all'
+
+        return {"plan": 'load' if thresholdRecord['GPLAN_ID'] == 1 else 'search',
+                "behavior": thresholdRecord['BEHAVIOR'],
+                "feature": ftypeCode,
+                "candidateCap": thresholdRecord['CANDIDATE_CAP'],
+                "scoringCap": thresholdRecord['SCORING_CAP'],
+                "sendToRedo": thresholdRecord['SEND_TO_REDO']}
+
+    def do_listGenericThresholds(self, arg):
+        """
+        Returns the list of generic thresholds
+
+        Syntax:
+            listGenericThresholds [optional_search_filter] [optional_output_format = table, json or jsonl]
+        """
+        arg = self.check_arg_for_output_format('list', arg)
+
+        json_lines = []
+        for thresholdRecord in sorted(self.getRecordList('CFG_GENERIC_THRESHOLD'), key=lambda k: (k['GPLAN_ID'], self.valid_behavior_codes.index(k['BEHAVIOR']))):
+            thresholdJson = self.formatGenericThresholdJson(thresholdRecord)
+            if arg and arg.lower() not in str(thresholdJson).lower():
+                continue
+            json_lines.append(thresholdJson)
+
+        self.print_json_lines(json_lines)
+
+    def validateGenericThreshold(self, record):
+        errorList = []
+
+        behaviorData, message = self.lookupBehaviorCode(record['BEHAVIOR'])
+        if not behaviorData:
+            errorList.append(message)
+
+        record['SENDTOREDO'], message = self.validateDomain('sendToRedo', record.get('SEND_TO_REDO'), ['Yes', 'No'])
+        if not record['SENDTOREDO']:
+            errorList.append(message)
+
+        if not isinstance(record['CANDIDATE_CAP'], int):
+            errorList.append('candidateCap must be an integer')
+
+        if not isinstance(record['SCORING_CAP'], int):
+            errorList.append('scoringCap must be an integer')
+
+        if errorList:
+            print(colorize(f"\nThe following errors were detected:", 'bad'))
+            for message in errorList:
+                print(colorize(f"- {message}", 'bad'))
+            record = None
+
+        return record
+
+    def do_addGenericThreshold(self, arg):
+        """
+        Add a new generic threshold
+
+        Syntax:
+            addGenericThreshold {json_configuration}
+
+        Examples:
+            see listGenericThreshold or getGenericThreshold for examples of json_configurations
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['PLAN', 'BEHAVIOR', 'SCORINGCAP', 'CANDIDATECAP', 'SENDTOREDO'])
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        parmData['PLAN'], message = self.validateDomain('plan', parmData.get('PLAN'), ['load', 'search'])
+        if not parmData['PLAN']:
+            colorize_msg(message, 'error')
+            return
+        gplan_id = 1 if parmData['PLAN'] == 'load' else 2
+
+        ftypeID = 0
+        if parmData.get('FEATURE'):
+            ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
+            if not ftypeRecord:
+                colorize_msg(message, 'error')
+                return
+            ftypeID = ftypeRecord['FTYPE_ID']
+
+        if self.getRecord('CFG_GENERIC_THRESHOLD', ['GPLAN_ID', 'BEHAVIOR', 'FTYPE_ID'], [gplan_id, parmData['BEHAVIOR'], ftypeID]):
+            colorize_msg('Generic threshold already exists', 'caution')
+            return
+
+        newRecord = {}
+        newRecord['GPLAN_ID'] = gplan_id
+        newRecord['BEHAVIOR'] = parmData['BEHAVIOR']
+        newRecord['FTYPE_ID'] = ftypeID
+        newRecord['CANDIDATE_CAP'] = parmData['CANDIDATECAP']
+        newRecord['SCORING_CAP'] = parmData['SCORINGCAP']
+        newRecord['SEND_TO_REDO'] = parmData['SENDTOREDO']
+        newRecord = self.validateGenericThreshold(newRecord)
+        if not newRecord:
+            return
+
+        self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].append(newRecord)
+        colorize_msg(f'Successfully added!', 'success')
+        self.configUpdated = True
+
+    def do_setGenericThreshold(self, arg):
+        """
+        Sets the comparison thresholds for a particular comparison threshold ID
+
+        Syntax:
+            setGenericThreshold {json_configuration}
+
+        Example:
+            setGenericThreshold {"plan": "search", "behavior": "NAME", "candidateCap": 500}
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['PLAN', 'BEHAVIOR'])
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        parmData['PLAN'], message = self.validateDomain('plan', parmData.get('PLAN'), ['load', 'search'])
+        if not parmData['PLAN']:
+            colorize_msg(message, 'error')
+            return
+        gplan_id = 1 if parmData['PLAN'] == 'load' else 2
+
+        ftypeID = 0
+        if parmData.get('FEATURE'):
+            ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
+            if not ftypeRecord:
+                colorize_msg(message, 'error')
+                return
+            ftypeID = ftypeRecord['FTYPE_ID']
+
+        oldRecord = self.getRecord('CFG_GENERIC_THRESHOLD', ['GPLAN_ID', 'BEHAVIOR', 'FTYPE_ID'], [gplan_id, parmData['BEHAVIOR'], ftypeID])
+        if not oldRecord:
+            colorize_msg('Generic threshold not found', 'caution')
+            return
+
+        oldParmData = dictKeysUpper(self.formatGenericThresholdJson(oldRecord))
+        newParmData = self.settable_parms(oldParmData, parmData, ('SENDTOREDO', 'CANDIDATECAP', 'SCORINGCAP'))
+        if newParmData.get('errors'):
+            colorize_msg(newParmData['errors'], 'error')
+            return
+        if newParmData['update_cnt'] == 0:
+            colorize_msg('No changes detected', 'warning')
+            return
+
+        print(newParmData)
+        newRecord = dict(oldRecord)
+        newRecord['CANDIDATE_CAP'] = newParmData.get('CANDIDATECAP', newRecord['CANDIDATE_CAP'])
+        newRecord['SCORING_CAP'] = newParmData.get('SCORINGCAP', newRecord['SCORING_CAP'])
+        newRecord['SEND_TO_REDO'] = newParmData.get('SENDTOREDO', newRecord['SEND_TO_REDO'])
+        newRecord = self.validateGenericThreshold(newRecord)
+        if not newRecord:
+            return
+
+        self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].remove(oldRecord)
+        self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].append(newRecord)
+        colorize_msg(f'Successfully updated!', 'success')
+        self.configUpdated = True
+
+
 # ===== supporting codes =====
 
     def do_listReferenceCodes(self, arg):
@@ -3753,7 +3936,7 @@ class G2CmdShell(cmd.Cmd, object):
                 featureClasses
                 attributeClasses
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
         if arg:
             arg = arg.upper()
 
@@ -3871,7 +4054,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listStandardizeFunctions [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
         for funcRecord in sorted(self.getRecordList('CFG_SFUNC'), key=lambda k: k['SFUNC_ID']):
             if arg and arg.lower() not in str(funcRecord).lower():
@@ -3950,7 +4133,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listExpressionFuncstions [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
         for funcRecord in sorted(self.getRecordList('CFG_EFUNC'), key=lambda k: k['EFUNC_ID']):
             if arg and arg.lower() not in str(funcRecord).lower():
@@ -4032,7 +4215,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listComparisonFunctions [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
         for funcRecord in sorted(self.getRecordList('CFG_CFUNC'), key=lambda k: k['CFUNC_ID']):
             if arg and arg.lower() not in str(funcRecord).lower():
@@ -4203,7 +4386,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listComparisonThresholds [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
         for cfrtnRecord in sorted(self.getRecordList('CFG_CFRTN'), key=lambda k: (k['CFUNC_ID'], k['CFRTN_ID'])):
             cfrtnJson = self.formatComparisonThresholdJson(cfrtnRecord)
@@ -4248,7 +4431,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listDistinctnessFunctions [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
         for funcRecord in sorted(self.getRecordList('CFG_DFUNC'), key=lambda k: k['DFUNC_ID']):
             if arg and arg.lower() not in str(funcRecord).lower():
@@ -4388,7 +4571,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             listElements [optional_search_filter] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('list', arg)
 
         json_lines = []
         for elementRecord in sorted(self.getRecordList('CFG_FELEM'), key=lambda k: k['FELEM_CODE']):
@@ -4406,7 +4589,7 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             getElement [code or id] [optional_output_format = table, json or jsonl]
         """
-        arg = self.check_arg_for_output_format(arg)
+        arg = self.check_arg_for_output_format('record', arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
@@ -4982,166 +5165,6 @@ class G2CmdShell(cmd.Cmd, object):
 
         return
 
-    def do_listGenericThresholds(self, arg):
-        """\nlistGenericThresholds [search_filter]\n"""
-
-        planCode = {}
-        planCode[1] = 'load'
-        planCode[2] = 'search'
-
-        recordList = self.getRecordList('CFG_GENERIC_THRESHOLD')
-        for i in range(len(recordList)):
-            try:
-                recordList[i]['BEHAVIOR_ORDER'] = self.valid_behavior_codes.index(recordList[i]['BEHAVIOR'])
-            except:
-                recordList[i]['BEHAVIOR_ORDER'] = 99
-
-        json_lines = []
-        for thisRecord in sorted(recordList, key=lambda k: (k['GPLAN_ID'], k['BEHAVIOR_ORDER'])):
-            if arg and arg.lower() not in str(thisRecord).lower():
-                continue
-
-            if thisRecord.get("FTYPE_ID", 0) != 0:
-                ftypeCode = self.getRecord("CFG_FTYPE", "FTYPE_ID", thisRecord["FTYPE_ID"])["FTYPE_CODE"]
-            else:
-                ftypeCode = 'all'
-            json_lines.append({"plan": planCode[thisRecord['GPLAN_ID']],
-                               "behavior": thisRecord['BEHAVIOR'],
-                               "feature": ftypeCode,
-                               "candidateCap": thisRecord['CANDIDATE_CAP'],
-                               "scoringCap": thisRecord['SCORING_CAP'],
-                               "sendToRedo": thisRecord['SEND_TO_REDO']})
-        self.print_json_lines(json_lines)
-
-    def do_addGenericThreshold(self, arg):
-        """
-        \n\taddGenericThreshold {"plan": "load", "behavior": "<behavior_type>", "feature": "<feature>", "scoringCap": 99, "candidateCap": 99, "sendToRedo": "Yes"}
-        """
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['PLAN'] = parmData['PLAN'].upper()
-            parmData['BEHAVIOR'] = parmData['BEHAVIOR'].upper()
-            parmData['SCORINGCAP'] = int(parmData['SCORINGCAP'])
-            parmData['CANDIDATECAP'] = int(parmData['CANDIDATECAP'])
-            parmData['SENDTOREDO'] = parmData.get('SENDTOREDO', 'Yes').upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
-            return
-
-        if parmData['PLAN'] not in ('LOAD', 'SEARCH'):
-            print('\nPlan must either be "LOAD" or "SEARCH"\n')
-            return
-        gplan_id = 1 if parmData['PLAN'] == 'LOAD' else 2
-
-        behaviorData = parseFeatureBehavior(parmData['BEHAVIOR'])
-        if not behaviorData:
-            print(f"\n{parmData['BEHAVIOR']} is not a valid feature behavior\n")
-            return
-
-        if 'FEATURE' in parmData:
-            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-            if not ftypeRecord:
-                print(f"\n{parmData['FEATURE']} is not a valid feature\n")
-                return
-            elif getFeatureBehavior(ftypeRecord) != parmData['BEHAVIOR']:
-                print(f"\nFeature behavior is {getFeatureBehavior(ftypeRecord)} and does not match threshold behavior {parmData['BEHAVIOR']}\n")
-                return
-            ftypeID = ftypeRecord['FTYPE_ID']
-        else:
-            ftypeID = 0
-
-        if parmData['SENDTOREDO'] not in ('YES', 'NO'):
-            print('\nSendToRedo must be "Yes" or "No"\n')
-            return
-
-        listID = 0
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'])):
-            if self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['GPLAN_ID'] == gplan_id and \
-               self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['BEHAVIOR'] == parmData['BEHAVIOR'] and \
-               self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['FTYPE_ID'] == ftypeID:
-                listID = i
-        if listID:
-            print('\nGeneric threshold already exists.  Use setGenericThreshold to update it.\n')
-            return
-
-        newRecord = {}
-        newRecord['GPLAN_ID'] = gplan_id
-        newRecord['BEHAVIOR'] = parmData['BEHAVIOR']
-        newRecord['FTYPE_ID'] = ftypeID
-        newRecord['CANDIDATE_CAP'] = parmData['CANDIDATECAP']
-        newRecord['SCORING_CAP'] = parmData['SCORINGCAP']
-        newRecord['SEND_TO_REDO'] = 'Yes' if parmData['SENDTOREDO'].upper() == 'YES' else 'No'
-        self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].append(newRecord)
-        self.configUpdated = True
-        print('\nSuccessfully added!\n')
-        if self.doDebug:
-            debug(newRecord)
-
-    def do_setGenericThreshold(self, arg):
-        """
-        \n\tsetGenericThreshold {"plan": "load", "behavior": "<behavior_type>", "scoringCap": 99}
-        \n\tsetGenericThreshold {"plan": "search", "behavior": "<behavior_type>", "candidateCap": 99}\n
-        """
-
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        try:
-            parmData = dictKeysUpper(json.loads(arg))
-            parmData['PLAN'] = {'LOAD': 1, 'SEARCH': 2}[parmData['PLAN'].upper()]
-            parmData['BEHAVIOR'] = parmData['BEHAVIOR'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
-            return
-
-        print()
-
-        if 'FEATURE' in parmData:
-            ftypeRecord = self.getRecord('CFG_FTYPE', 'FTYPE_CODE', parmData['FEATURE'])
-            if not ftypeRecord:
-                print(f"\n{parmData['FEATURE']} is not a valid feature\n")
-                return
-            ftypeID = ftypeRecord['FTYPE_ID']
-        else:
-            ftypeID = 0
-
-        if parmData.get('SENDTOREDO') and parmData.get('SENDTOREDO').upper() not in ('YES', 'NO'):
-            print('\nSendToRedo must be "Yes" or "No"\n')
-            return
-
-        listID = -1
-        for i in range(len(self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'])):
-            if self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['GPLAN_ID'] == parmData['PLAN'] and \
-               self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['BEHAVIOR'] == parmData['BEHAVIOR'] and \
-               self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][i]['FTYPE_ID'] == ftypeID:
-                listID = i
-        if listID == -1:
-            colorize_msg('Threshold does not exist')
-            return
-
-        # make the updates
-        if 'CANDIDATECAP' in parmData:
-            self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][listID]['CANDIDATE_CAP'] = int(
-                parmData['CANDIDATECAP'])
-            colorize_msg('Candidate cap updated')
-            self.configUpdated = True
-        if 'SCORINGCAP' in parmData:
-            self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][listID]['SCORING_CAP'] = int(parmData['SCORINGCAP'])
-            colorize_msg('Scoring cap updated')
-            self.configUpdated = True
-
-        if 'SENDTOREDO' in parmData:
-            self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'][listID]['SEND_TO_REDO'] = 'Yes' if parmData['SENDTOREDO'].upper() == 'YES' else 'No'
-            colorize_msg('Send to redo updated')
-            self.configUpdated = True
-
-        print()
-
     # ===== system parameters  =====
 
     def do_listSystemParameters(self, arg):
@@ -5200,12 +5223,12 @@ class G2CmdShell(cmd.Cmd, object):
         if type(json_obj) not in [dict, list]:
             json_obj = json.loads(json_obj)
 
-        if self.current_output_format == 'table':
+        if self.current_output_format_record == 'table':
             render_string = self.print_json_as_table(json_obj if type(json_obj) == list else [json_obj])
             self.print_scrolling(render_string)
             return
 
-        if self.current_output_format == 'json':
+        if self.current_output_format_record == 'json':
             json_str = json.dumps(json_obj, indent=4)
         else:
             json_str = json.dumps(json_obj)
@@ -5225,9 +5248,9 @@ class G2CmdShell(cmd.Cmd, object):
         if display_header:
             print(f'\n{display_header}')
 
-        if self.current_output_format == 'table':
+        if self.current_output_format_list == 'table':
             render_string = self.print_json_as_table(json_lines)
-        elif self.current_output_format == 'jsonl':
+        elif self.current_output_format_list == 'jsonl':
             render_string = ''
             for line in json_lines:
                 if self.pygmentsInstalled:
