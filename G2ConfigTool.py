@@ -197,7 +197,7 @@ def colorize_json(json_str):
 
 class G2CmdShell(cmd.Cmd, object):
 
-    def __init__(self, g2module_params, hist_disable, force_mode, file_to_process, debug):
+    def __init__(self, g2module_params, hist_disable, force_mode, file_to_process):
         cmd.Cmd.__init__(self)
 
         # Cmd Module settings
@@ -229,8 +229,6 @@ class G2CmdShell(cmd.Cmd, object):
         self.attributeClassList = ('NAME', 'ATTRIBUTE', 'IDENTIFIER', 'ADDRESS', 'PHONE', 'RELATIONSHIP', 'OTHER')
         self.lockedFeatureList = ('NAME', 'ADDRESS', 'PHONE', 'DOB', 'REL_LINK', 'REL_ANCHOR', 'REL_POINTER')
         self.valid_behavior_codes = ['NAME','A1','A1E','A1ES','F1','F1E','F1ES','FF','FFE','FFES','FM','FME','FMES','FVM','FVME','FVMES','NONE']
-
-        self.doDebug = debug
 
         # Setup for pretty printing
         Colors.set_theme('DEFAULT')
@@ -1258,8 +1256,6 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_DSRC'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
-        if self.doDebug:
-            debug(newRecord)
 
     def do_listDataSources(self, arg):
         """
@@ -1510,8 +1506,6 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['RTYPE_ID'] = parmData.get('RTYPEID', 0)
 
         self.cfgData['G2_CONFIG']['CFG_FTYPE'].append(newRecord)
-        if self.doDebug:
-            debug(newRecord, 'Feature build')
 
         # add the standardization call
         sfcallID = 0
@@ -1524,8 +1518,6 @@ class G2CmdShell(cmd.Cmd, object):
             newRecord['FTYPE_ID'] = ftypeID
             newRecord['FELEM_ID'] = -1
             self.cfgData['G2_CONFIG']['CFG_SFCALL'].append(newRecord)
-            if self.doDebug:
-                debug(newRecord, 'SFCALL build')
 
         # add the distinct value call (not supported through here yet)
         dfcallID = 0
@@ -1538,8 +1530,6 @@ class G2CmdShell(cmd.Cmd, object):
             newRecord['EXEC_ORDER'] = 1
             newRecord['FTYPE_ID'] = ftypeID
             self.cfgData['G2_CONFIG']['CFG_DFCALL'].append(newRecord)
-            if self.doDebug:
-                debug(newRecord, 'DFCALL build')
 
         # add the expression call
         efcallID = 0
@@ -1554,8 +1544,6 @@ class G2CmdShell(cmd.Cmd, object):
             newRecord['EFEAT_FTYPE_ID'] = -1
             newRecord['IS_VIRTUAL'] = 'No'
             self.cfgData['G2_CONFIG']['CFG_EFCALL'].append(newRecord)
-            if self.doDebug:
-                debug(newRecord, 'EFCALL build')
 
         # add the comparison call
         cfcallID = 0
@@ -1567,8 +1555,6 @@ class G2CmdShell(cmd.Cmd, object):
             newRecord['EXEC_ORDER'] = 1
             newRecord['FTYPE_ID'] = ftypeID
             self.cfgData['G2_CONFIG']['CFG_CFCALL'].append(newRecord)
-            if self.doDebug:
-                debug(newRecord, 'CFCALL build')
 
         fbomOrder = 0
         for element in parmData['ELEMENTLIST']:
@@ -1597,8 +1583,6 @@ class G2CmdShell(cmd.Cmd, object):
                 newRecord['DATA_TYPE'] = 'string'
                 newRecord['TOKENIZE'] = 'No'
                 self.cfgData['G2_CONFIG']['CFG_FELEM'].append(newRecord)
-                if self.doDebug:
-                    debug(newRecord, 'FELEM build')
 
             # add all elements to distinct bom if specified
             if dfcallID > 0:
@@ -1608,8 +1592,6 @@ class G2CmdShell(cmd.Cmd, object):
                 newRecord['FTYPE_ID'] = ftypeID
                 newRecord['FELEM_ID'] = felemID
                 self.cfgData['G2_CONFIG']['CFG_DFBOM'].append(newRecord)
-                if self.doDebug:
-                    debug(newRecord, 'DFBOM build')
 
             # add to expression bom if directed to
             if efcallID > 0 and elementRecord['EXPRESSED'].upper() == 'YES':
@@ -1620,8 +1602,6 @@ class G2CmdShell(cmd.Cmd, object):
                 newRecord['FELEM_ID'] = felemID
                 newRecord['FELEM_REQ'] = 'Yes'
                 self.cfgData['G2_CONFIG']['CFG_EFBOM'].append(newRecord)
-                if self.doDebug:
-                    debug(newRecord, 'EFBOM build')
 
             # add to comparison bom if directed to
             if cfcallID > 0 and elementRecord['COMPARED'].upper() == 'YES':
@@ -1631,8 +1611,6 @@ class G2CmdShell(cmd.Cmd, object):
                 newRecord['FTYPE_ID'] = ftypeID
                 newRecord['FELEM_ID'] = felemID
                 self.cfgData['G2_CONFIG']['CFG_CFBOM'].append(newRecord)
-                if self.doDebug:
-                    debug(newRecord, 'CFBOM build')
 
             # standardize display_level to just display while maintaining backwards compatibility
             if 'DISPLAY' in elementRecord:
@@ -1648,8 +1626,6 @@ class G2CmdShell(cmd.Cmd, object):
             newRecord['DERIVED'] = elementRecord['DERIVED'] if 'DERIVED' in elementRecord else 'No'
 
             self.cfgData['G2_CONFIG']['CFG_FBOM'].append(newRecord)
-            if self.doDebug:
-                debug(newRecord, 'FBOM build')
 
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
@@ -2000,8 +1976,6 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_ATTR'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
-        if self.doDebug:
-            debug(newRecord)
 
     def do_listAttributes(self, arg):
         """
@@ -2255,7 +2229,7 @@ class G2CmdShell(cmd.Cmd, object):
         return
 
 
-# ===== rules fragments =====
+# ===== ragments commands =====
 
     def formatFragmentJson(self, record):
         return {'id': record['ERFRAG_ID'],
@@ -2339,8 +2313,6 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_ERFRAG'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
-        if self.doDebug:
-            debug(newRecord)
 
     def do_setFragment(self, arg):
         """
@@ -2584,8 +2556,6 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_ERRULE'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
-        if self.doDebug:
-            debug(newRecord)
 
     def do_setRule(self, arg):
         """
@@ -2803,8 +2773,6 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['SFUNC_ID'] = sfuncID
         newRecord['EXEC_ORDER'] = sfcallOrder
         self.cfgData['G2_CONFIG']['CFG_SFCALL'].append(newRecord)
-        if self.doDebug:
-            debug(newRecord)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
 
@@ -3241,8 +3209,6 @@ class G2CmdShell(cmd.Cmd, object):
             cfbomRecord['FELEM_ID'] = bom_felemID
             cfbomRecord['EXEC_ORDER'] = execOrder
             cfbomRecordList.append(cfbomRecord)
-            if self.doDebug:
-                debug(cfbomRecord, 'CFBOM build')
 
         if len(cfbomRecordList) == 0:
             colorize_msg('No elements were found in the elementList', 'error')
@@ -3254,8 +3220,6 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['CFUNC_ID'] = cfuncID
         newRecord['EXEC_ORDER'] = parmData['EXECORDER']
         self.cfgData['G2_CONFIG']['CFG_CFCALL'].append(newRecord)
-        if self.doDebug:
-            debug(newRecord, 'CFCALL build')
         self.cfgData['G2_CONFIG']['CFG_CFBOM'].extend(cfbomRecordList)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
@@ -3431,8 +3395,6 @@ class G2CmdShell(cmd.Cmd, object):
             dfbomRecord['FELEM_ID'] = bom_felemID
             dfbomRecord['EXEC_ORDER'] = execOrder
             dfbomRecordList.append(dfbomRecord)
-            if self.doDebug:
-                debug(dfbomRecord, 'DFBOM build')
 
         if len(dfbomRecordList) == 0:
             colorize_msg('No elements were found in the elementList', 'error')
@@ -3444,8 +3406,6 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['CFUNC_ID'] = cfuncID
         newRecord['EXEC_ORDER'] = parmData['EXECORDER']
         self.cfgData['G2_CONFIG']['CFG_DFCALL'].append(newRecord)
-        if self.doDebug:
-            debug(newRecord, 'DFCALL build')
         self.cfgData['G2_CONFIG']['CFG_DFBOM'].extend(dfbomRecordList)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
@@ -3826,7 +3786,6 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_FBOVR'].append(newRecord)
         colorize_msg(f'Successfully added!', 'success')
         self.configUpdated = True
-
 
     def do_deleteBehaviorOveride(self, arg):
         """
@@ -4300,8 +4259,6 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_SFUNC'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
-        if self.doDebug:
-            debug(newRecord)
 
     def do_listStandardizationFunctions(self, arg):
         """
@@ -4379,8 +4336,6 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_EFUNC'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
-        if self.doDebug:
-            debug(newRecord)
 
     def do_listExpressionFunctions(self, arg):
         """
@@ -4461,8 +4416,6 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_CFUNC'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
-        if self.doDebug:
-            debug(newRecord)
 
     def do_listComparisonFunctions(self, arg):
         """
@@ -4581,8 +4534,6 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_CFRTN'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
-        if self.doDebug:
-            debug(newRecord)
 
     def do_setComparisonThreshold(self, arg):
         """
@@ -4755,8 +4706,6 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_DFUNC'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
-        if self.doDebug:
-            debug(newRecord)
 
     # element functions
 
@@ -4817,8 +4766,6 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_FELEM'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
-        if self.doDebug:
-            debug(newRecord)
 
     def do_listElements(self, arg):
         """
@@ -4941,7 +4888,7 @@ class G2CmdShell(cmd.Cmd, object):
 
     def do_getCompatibilityVersion(self, arg):
         """
-        Retrive the compatiblity version of this configuration
+        Retrieve the compatiblity version of this configuration
 
         Syntax:
             getCompatibilityVersion
@@ -5020,10 +4967,6 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['FTYPE_ID'] = ftypeID
         newRecord['FELEM_ID'] = felemID
         self.cfgData['G2_CONFIG']['CFG_CFBOM'].append(newRecord)
-        if self.doDebug:
-            debug(newRecord, 'CFBOM build')
-
-        # we made it!
         self.configUpdated = True
         colorize_msg('Successfully added!', 'success')
 
@@ -5083,8 +5026,6 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['FTYPE_ID'] = ftypeID
         newRecord['FELEM_ID'] = felemID
         self.cfgData['G2_CONFIG']['CFG_DFBOM'].append(newRecord)
-        if self.doDebug:
-            debug(newRecord, 'DFBOM build')
 
         # we made it!
         self.configUpdated = True
@@ -5161,8 +5102,6 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['EXEC_ORDER'] = 1
         newRecord['FTYPE_ID'] = ftypeID
         self.cfgData['G2_CONFIG']['CFG_CFCALL'].append(newRecord)
-        if self.doDebug:
-            debug(newRecord, 'CFCALL build')
 
         # add elements
         cfbomOrder = 0
@@ -5185,8 +5124,6 @@ class G2CmdShell(cmd.Cmd, object):
             newRecord['FTYPE_ID'] = ftypeID
             newRecord['FELEM_ID'] = felemID
             self.cfgData['G2_CONFIG']['CFG_CFBOM'].append(newRecord)
-            if self.doDebug:
-                debug(newRecord, 'CFBOM build')
 
         # we made it!
         self.configUpdated = True
@@ -5372,54 +5309,6 @@ class G2CmdShell(cmd.Cmd, object):
 
     # ===== misc commands =====
 
-    def do_setDistinct(self, arg):
-        """
-        \n\tDistinct processing only compares the most complete feature values for an entity. You may want to turn this off for watch list checking.
-        \n\n\tSyntax:
-        \n\t\tsetDistinct on
-        \n\t\tsetDistinct off\n
-        """
-
-        if not arg:
-            colorize_msg(
-                'Distinct is currently %s' % ('ON' if len(self.cfgData['G2_CONFIG']['CFG_DFCALL']) != 0 else 'OFF'),
-                'B')
-            return
-
-        if arg.upper() not in ('ON', 'OFF'):
-            colorize_msg('invalid distinct setting %s' % arg, 'B')
-            return
-
-        newSetting = arg.upper()
-
-        if len(self.cfgData['G2_CONFIG']['CFG_DFCALL']) == 0 and newSetting == 'OFF':
-            colorize_msg('distinct is already off', 'B')
-            return
-
-        if len(self.cfgData['G2_CONFIG']['CFG_DFCALL']) != 0 and newSetting == 'ON':
-            colorize_msg('distinct is already on', 'B')
-            return
-
-        if newSetting == 'OFF':
-            self.cfgData['G2_CONFIG']['XXX_DFCALL'] = self.cfgData['G2_CONFIG']['CFG_DFCALL']
-            self.cfgData['G2_CONFIG']['XXX_DFBOM'] = self.cfgData['G2_CONFIG']['CFG_DFBOM']
-            self.cfgData['G2_CONFIG']['CFG_DFCALL'] = []
-            self.cfgData['G2_CONFIG']['CFG_DFBOM'] = []
-        else:
-            if 'XXX_DFCALL' not in self.cfgData['G2_CONFIG']:
-                colorize_msg('distinct settings cannot be restored, backup could not be found', 'B')
-                return
-
-            self.cfgData['G2_CONFIG']['CFG_DFCALL'] = self.cfgData['G2_CONFIG']['XXX_DFCALL']
-            self.cfgData['G2_CONFIG']['CFG_DFBOM'] = self.cfgData['G2_CONFIG']['XXX_DFBOM']
-            del (self.cfgData['G2_CONFIG']['XXX_DFCALL'])
-            del (self.cfgData['G2_CONFIG']['XXX_DFBOM'])
-
-        colorize_msg('distinct is now %s' % newSetting, 'B')
-
-        self.configUpdated = True
-
-        return
 
     # ===== system parameters  =====
 
@@ -5625,15 +5514,6 @@ def storeNullableJsonNumeric(val):
         return val
 
 
-def debug(data, loc=''):
-    colorize_msg(textwrap.dedent(f'''\
-    <--- DEBUG
-    Func: {sys._getframe(1).f_code.co_name}
-    Loc: {loc}
-    Data: {data}
-    --->
-    '''), 'E')
-
 if __name__ == '__main__':
 
     argParser = argparse.ArgumentParser()
@@ -5644,7 +5524,6 @@ if __name__ == '__main__':
                            help='when reading from a file, execute each command without prompts')
     argParser.add_argument('-H', '--histDisable', dest='histDisable', action='store_true', default=False,
                            help='disable history file usage')
-    argParser.add_argument('-D', '--debug', action='store_true', default=False, help='turn on debug')
     args = argParser.parse_args()
 
     # Check if INI file or env var is specified, otherwise use default INI file
@@ -5662,7 +5541,7 @@ if __name__ == '__main__':
         iniParamCreator = G2IniParams()
         g2module_params = iniParamCreator.getJsonINIParams(iniFileName)
 
-    cmd_obj = G2CmdShell(g2module_params, args.histDisable, args.forceMode, args.fileToProcess, args.debug)
+    cmd_obj = G2CmdShell(g2module_params, args.histDisable, args.forceMode, args.fileToProcess)
 
     if args.fileToProcess:
         cmd_obj.fileloop()
