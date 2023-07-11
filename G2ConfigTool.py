@@ -1145,6 +1145,12 @@ class G2CmdShell(cmd.Cmd, object):
             return erruleRecord, f'Rule {lookup_value} already exists!'
         return None, f'Rule {lookup_value} not found!'
 
+    def lookupGenericPlan(self, plan):
+        gplanRecord = self.getRecord('CFG_GPLAN', 'GPLAN_CODE', plan)
+        if gplanRecord:
+            return gplanRecord, f'Plan "{plan}" already exists'
+        return None, f'Plan "{plan}" not found'
+
     def required_parms(self, parm_dict, attr_list):
         missing_list = []
         for attr in attr_list:
@@ -3746,15 +3752,222 @@ class G2CmdShell(cmd.Cmd, object):
         self.do_deleteCallElement(json.dumps(parmData))
 
 
+# ===== feature behavior overides =====
+
+    def formatBehaviorOverideJson(self, behaviorRecord):
+        ftypeCode = self.getRecord("CFG_FTYPE", "FTYPE_ID", behaviorRecord["FTYPE_ID"])["FTYPE_CODE"]
+
+        return {"feature": ftypeCode,
+                "usageType": behaviorRecord['UTYPE_CODE'],
+                "behavior": getFeatureBehavior(behaviorRecord)}
+
+    def do_listBehaviorOverides(self, arg):
+        """
+        Returns the list of feature behavior overides
+
+        Syntax:
+            listBehaviorOverides [optional_search_filter] [optional_output_format = table, json or jsonl]
+        """
+        arg = self.check_arg_for_output_format('list', arg)
+
+        json_lines = []
+        for behaviorRecord in sorted(self.getRecordList('CFG_FBOVR'), key=lambda k: (k['FTYPE_ID'], k['UTYPE_CODE'])):
+            behaviorJson = self.formatBehaviorOverideJson(behaviorRecord)
+            if arg and arg.lower() not in str(behaviorJson).lower():
+                continue
+            json_lines.append(behaviorJson)
+
+        self.print_json_lines(json_lines)
+
+    def do_addBehaviorOveride(self, arg):
+        """
+        Add a new behavior overide
+
+        Syntax:
+            addBehaviorOveride {json_configuration}
+
+        Examples:
+            see listBehaviorOverides for examples of json_configurations
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['FEATURE', 'USAGETYPE', 'BEHAVIOR'])
+            parmData['USAGETYPE'] = parmData['USAGETYPE'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
+        if not ftypeRecord:
+            colorize_msg(message, 'error')
+            return
+        ftypeID = ftypeRecord['FTYPE_ID']
+
+        behaviorData, message = self.lookupBehaviorCode(parmData['BEHAVIOR'])
+        if not behaviorData:
+            colorize_msg(message, 'error')
+            return
+
+        if self.getRecord('CFG_FBOVR', ['FTYPE_ID', 'UTYPE_CODE'], [ftypeID, parmData['USAGETYPE']]):
+            colorize_msg('Behavior override already exists', 'caution')
+            return
+
+        newRecord = {}
+        newRecord['FTYPE_ID'] = ftypeID
+        newRecord['ECLASS_ID'] = 0
+        newRecord['UTYPE_CODE'] = parmData['USAGETYPE']
+        newRecord['FTYPE_FREQ'] = behaviorData['FREQUENCY']
+        newRecord['FTYPE_EXCL'] = behaviorData['EXCLUSIVITY']
+        newRecord['FTYPE_STAB'] = behaviorData['STABILITY']
+
+        self.cfgData['G2_CONFIG']['CFG_FBOVR'].append(newRecord)
+        colorize_msg(f'Successfully added!', 'success')
+        self.configUpdated = True
+
+
+    def do_deleteBehaviorOveride(self, arg):
+        """
+        Deletes a behavior overide
+
+        Syntax:
+            deleteBehaviorOveride {"feature": "<feature>", "usageType": "<usageType>"}
+
+        Example:
+            deleteBehaviorOveride {"feature": "PHONE", "usageType": "MOBILE"}
+        """
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['FEATURE', 'USAGETYPE'])
+            parmData['USAGETYPE'] = parmData['USAGETYPE'].upper()
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
+        if not ftypeRecord:
+            colorize_msg(message, 'error')
+            return
+        ftypeID = ftypeRecord['FTYPE_ID']
+
+        behaviorRecord = self.getRecord('CFG_FBOVR', ['FTYPE_ID', 'UTYPE_CODE'], [ftypeID, parmData['USAGETYPE']])
+        if not behaviorRecord:
+            colorize_msg('Behavior override does not exist', 'warning')
+            return
+
+        self.cfgData['G2_CONFIG']['CFG_FBOVR'].remove(behaviorRecord)
+        colorize_msg(f'Successfully deleted!', 'success')
+        self.configUpdated = True
+
+
+# ===== generic plan commands =====
+
+    def do_listGenericPlans(self, arg):
+        """
+        Returns the list of generic threshold plans
+
+        Syntax:
+            listGenericPlans [optional_search_filter] [optional_output_format = table, json or jsonl]
+        """
+        arg = self.check_arg_for_output_format('list', arg)
+        json_lines = []
+        for planRecord in sorted(self.getRecordList('CFG_GPLAN'), key=lambda k: k['GPLAN_ID']):
+            if arg and arg.lower() not in str(planRecord).lower():
+                continue
+            json_lines.append({"id": planRecord['GPLAN_ID'], "plan": planRecord['GPLAN_CODE'], "description": planRecord['GPLAN_DESC']})
+
+        self.print_json_lines(json_lines)
+
+    def do_cloneGenericPlan(self, arg):
+        """
+        Create a new generic plan based on an existing one
+
+        Syntax:
+            cloneGenericPlan {"existingPlan": "<plan>", "newPlan": "<plan>", "description": "<describe plan>"}
+
+        Examples:
+            cloneGenericPlan {"existingPlan": "SEARCH", "newPlan": "SEARCH-EXHAUSTIVE", "description": "Exhaustive search"}
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['EXISTINGPLAN', 'NEWPLAN'])
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        planRecord1, message = self.lookupGenericPlan(parmData['EXISTINGPLAN'])
+        if not planRecord1:
+            colorize_msg(message, 'warning')
+            return
+
+        planRecord2, message = self.lookupGenericPlan(parmData['NEWPLAN'])
+        if planRecord2:
+            colorize_msg(message, 'warning')
+            return
+
+        next_id = self.checkDesiredRecordID('CFG_GPLAN', 'GPLAN_ID', 0, seed_order = 0)
+
+        newRecord = {}
+        newRecord['GPLAN_ID'] = next_id
+        newRecord['GPLAN_CODE'] = parmData['NEWPLAN']
+        newRecord['GPLAN_DESC'] = parmData.get('DESCRIPTION', parmData['NEWPLAN'])
+
+        self.cfgData['G2_CONFIG']['CFG_GPLAN'].append(newRecord)
+        for thresholdRecord in self.getRecordList('CFG_GENERIC_THRESHOLD', 'GPLAN_ID', planRecord1['GPLAN_ID']):
+            newRecord = dict(thresholdRecord)
+            newRecord['GPLAN_ID'] = next_id
+            self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].append(newRecord)
+        self.configUpdated = True
+        colorize_msg('Successfully added!', 'success')
+
+    def do_deleteGenericPlan(self, arg):
+        """
+        Delete an existing generic threshold plan
+
+        Syntax:
+            deleteGenericPlan [code or id]
+
+        Caution:
+            Plan IDs 1 and 2 are required by the system and cannot be deleted!
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'PLAN', 'GPLAN_ID', 'GPLAN_CODE')
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        planRecord = self.getRecord('CFG_GPLAN', searchField, searchValue)
+        if not planRecord:
+            colorize_msg('Generic plan not found', 'warning')
+            return
+        if planRecord['GPLAN_ID'] <= 2:
+            colorize_msg(f"The {planRecord['GPLAN_CODE']} plan cannot be deleted", 'error')
+            return
+
+        self.cfgData['G2_CONFIG']['CFG_GPLAN'].remove(planRecord)
+        for thresholdRecord in self.getRecordList('CFG_GENERIC_THRESHOLD', 'GPLAN_ID', planRecord['GPLAN_ID']):
+            self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].remove(thresholdRecord)
+        colorize_msg(f'Successfully deleted!', 'success')
+        self.configUpdated = True
+
 # ===== generic threshold commands =====
 
     def formatGenericThresholdJson(self, thresholdRecord):
+        gplanCode = self.getRecord("CFG_GPLAN", "GPLAN_ID", thresholdRecord["GPLAN_ID"])["GPLAN_CODE"]
         if thresholdRecord.get("FTYPE_ID", 0) != 0:
             ftypeCode = self.getRecord("CFG_FTYPE", "FTYPE_ID", thresholdRecord["FTYPE_ID"])["FTYPE_CODE"]
         else:
             ftypeCode = 'all'
 
-        return {"plan": 'load' if thresholdRecord['GPLAN_ID'] == 1 else 'search',
+        return {"plan": gplanCode,
                 "behavior": thresholdRecord['BEHAVIOR'],
                 "feature": ftypeCode,
                 "candidateCap": thresholdRecord['CANDIDATE_CAP'],
@@ -3812,7 +4025,7 @@ class G2CmdShell(cmd.Cmd, object):
             addGenericThreshold {json_configuration}
 
         Examples:
-            see listGenericThreshold or getGenericThreshold for examples of json_configurations
+            see listGenericThresholds for examples of json_configurations
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -3824,14 +4037,14 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Syntax error: {err}', 'error')
             return
 
-        parmData['PLAN'], message = self.validateDomain('plan', parmData.get('PLAN'), ['load', 'search'])
-        if not parmData['PLAN']:
+        gplanRecord, message = self.lookupGenericPlan(parmData['PLAN'])
+        if not gplanRecord:
             colorize_msg(message, 'error')
             return
-        gplan_id = 1 if parmData['PLAN'] == 'load' else 2
+        gplan_id = gplanRecord['GPLAN_ID']
 
         ftypeID = 0
-        if parmData.get('FEATURE'):
+        if parmData.get('FEATURE') and parmData.get('FEATURE') != 'all':
             ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
             if not ftypeRecord:
                 colorize_msg(message, 'error')
@@ -3865,7 +4078,7 @@ class G2CmdShell(cmd.Cmd, object):
             setGenericThreshold {json_configuration}
 
         Example:
-            setGenericThreshold {"plan": "search", "behavior": "NAME", "candidateCap": 500}
+            setGenericThreshold {"plan": "search", "feature": "all", "behavior": "NAME", "candidateCap": 500}
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -3877,14 +4090,14 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Syntax error: {err}', 'error')
             return
 
-        parmData['PLAN'], message = self.validateDomain('plan', parmData.get('PLAN'), ['load', 'search'])
-        if not parmData['PLAN']:
+        gplanRecord, message = self.lookupGenericPlan(parmData['PLAN'])
+        if not gplanRecord:
             colorize_msg(message, 'error')
             return
-        gplan_id = 1 if parmData['PLAN'] == 'load' else 2
+        gplan_id = gplanRecord['GPLAN_ID']
 
         ftypeID = 0
-        if parmData.get('FEATURE'):
+        if parmData.get('FEATURE') and parmData.get('FEATURE') != 'all':
             ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
             if not ftypeRecord:
                 colorize_msg(message, 'error')
@@ -3917,6 +4130,49 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].remove(oldRecord)
         self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].append(newRecord)
         colorize_msg(f'Successfully updated!', 'success')
+        self.configUpdated = True
+
+    def do_deleteGenericThreshold(self, arg):
+        """
+        Deletes a generic threshold record
+
+        Syntax:
+            deleteGenericThreshold {json_configuration}
+
+        Example:
+            deleteGenericThreshold {"plan": "search", "feature": "all", "behavior": "NAME"}
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.required_parms(parmData, ['PLAN', 'BEHAVIOR'])
+        except (ValueError, KeyError) as err:
+            colorize_msg(f'Syntax error: {err}', 'error')
+            return
+
+        gplanRecord, message = self.lookupGenericPlan(parmData['PLAN'])
+        if not gplanRecord:
+            colorize_msg(message, 'error')
+            return
+        gplan_id = gplanRecord['GPLAN_ID']
+
+        ftypeID = 0
+        if parmData.get('FEATURE') and parmData.get('FEATURE') != 'all':
+            ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
+            if not ftypeRecord:
+                colorize_msg(message, 'error')
+                return
+            ftypeID = ftypeRecord['FTYPE_ID']
+
+        oldRecord = self.getRecord('CFG_GENERIC_THRESHOLD', ['GPLAN_ID', 'BEHAVIOR', 'FTYPE_ID'], [gplan_id, parmData['BEHAVIOR'], ftypeID])
+        if not oldRecord:
+            colorize_msg('Generic threshold not found', 'caution')
+            return
+
+        self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].remove(oldRecord)
+        colorize_msg(f'Successfully deleted!', 'success')
         self.configUpdated = True
 
 
