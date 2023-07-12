@@ -1,6 +1,7 @@
 [pylint]
 disable=
     arguments-differ,
+    arguments-renamed,
     attribute-defined-outside-init,
     bad-continuation,
     bad-option-value,
