@@ -233,6 +233,9 @@ class G2CmdShell(cmd.Cmd, object):
                                 'ATTRIBUTE': 'string|25',
                                 'FRAGMENT': 'string|25',
                                 'RULE': 'string|25',
+                                'TIER': 'integer',
+                                'RTYPEID': 'integer',
+                                'REF_SCORE': 'integer',
                                 'FUNCTION': 'string|25'}
 
         # Setup for pretty printing
@@ -829,13 +832,13 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of all known configurations
 
         Syntax:
-            getConfigList [optional_output_format]
+            getConfigList [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         try:
             response = bytearray()
             self.g2_configmgr.getConfigList(response)
-            self.print_json_record(response.decode())
+            self.print_json_record(json.loads(response.decode())['CONFIGS'])
         except G2Exception as err:
             colorize_msg(err, 'error')
 
@@ -1157,7 +1160,7 @@ class G2CmdShell(cmd.Cmd, object):
     def validate_parms(self, parm_dict, required_list):
         for attr_name in parm_dict:
             attr_value = parm_dict[attr_name]
-            if self.json_attr_types.get(attr_name):
+            if attr_value and self.json_attr_types.get(attr_name):
                 data_type = self.json_attr_types.get(attr_name).split('|')[0]
                 max_width = int(self.json_attr_types.get(attr_name).split('|')[1]) if '|' in self.json_attr_types.get(attr_name) else 0
                 if data_type == 'integer':
@@ -1174,7 +1177,7 @@ class G2CmdShell(cmd.Cmd, object):
             if attr not in parm_dict:
                 missing_list.append(attr)
         if missing_list:
-            raise ValueError(f"{', '.join(missing_list)} {'is' if len(missing_list) == 1 else 'are'} missing")
+            raise ValueError(f"{', '.join(missing_list)} {'is' if len(missing_list) == 1 else 'are'} required")
 
     def settable_parms(self, old_parm_data, set_parm_data, settable_parm_list):
         new_parm_data = dict(old_parm_data)
@@ -1239,8 +1242,8 @@ class G2CmdShell(cmd.Cmd, object):
             self.validate_parms(parmData, ['DATASOURCE'])
             parmData['ID'] = parmData.get('ID', 0)
             parmData['DATASOURCE'] = parmData['DATASOURCE'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         dsrcRecord, message = self.lookupDatasource(parmData['DATASOURCE'])
@@ -1281,7 +1284,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of registered data sources
 
         Syntax:
-            listDataSources [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listDataSources [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
@@ -1307,8 +1310,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'DATASOURCE', 'DSRC_ID', 'DSRC_CODE')
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         dsrcRecord = self.getRecord('CFG_DSRC', searchField, searchValue)
@@ -1352,10 +1355,7 @@ class G2CmdShell(cmd.Cmd, object):
                      "standardize": sfuncRecord['SFUNC_CODE'] if sfuncRecord else '',
                      "expression": efuncRecord['EFUNC_CODE'] if efuncRecord else '',
                      "comparison": cfuncRecord['CFUNC_CODE'] if cfuncRecord else '',
-                     "matchKey": ftypeRecord['SHOW_IN_MATCH_KEY'],
-                     "derived": ftypeRecord['DERIVED'],
-                     "rtypeID": ftypeRecord['RTYPE_ID'],
-                     "version": ftypeRecord['VERSION']}
+                     "matchKey": ftypeRecord['SHOW_IN_MATCH_KEY']}
 
         elementList = []
         fbomRecordList = self.getRecordList('CFG_FBOM', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
@@ -1406,9 +1406,9 @@ class G2CmdShell(cmd.Cmd, object):
             parmData['ID'] = parmData.get('ID', 0)
             parmData['FEATURE'] = parmData['FEATURE'].upper()
             if 'ELEMENTLIST' not in parmData or len(parmData['ELEMENTLIST']) == 0 or not isinstance(parmData['ELEMENTLIST'], list):
-                raise ValueError('The list of elements is missing or in the wrong format')
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+                raise ValueError('elementList is required')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
@@ -1654,15 +1654,16 @@ class G2CmdShell(cmd.Cmd, object):
         Sets configuration parameters for an existing feature
 
         Syntax:
-            setFeature [partial_json_configuration]
+            setFeature {partial_json_configuration}
 
         Examples:
             setFeature {"feature": "NAME", "candidates": "Yes"}
 
         Caution:
-            - The ID cannot be changed here. You must delete and re-add to change it.
-            - Standardization, expression and comparison routines cannot be set here.
-              Use their specific add and delete call commands to adjust them.
+            - Not everything about a feature can be set here. Some changes will require a delete and re-add of the
+              feature. For instance, you cannot change a feature's ID or its list of elements.
+            - Standardization, expression and comparison routines cannot be changed here.  However, you can
+              use their call commands to make changes. e.g, deleteExpressionCall, addExpressionCall, etc.
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -1671,8 +1672,8 @@ class G2CmdShell(cmd.Cmd, object):
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['FEATURE'])
             parmData['FEATURE'] = parmData['FEATURE'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         old_ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
@@ -1686,7 +1687,6 @@ class G2CmdShell(cmd.Cmd, object):
         for parmCode in parmData:
             if parmCode == 'FEATURE':
                 continue
-
             if parmCode == 'CANDIDATES':
                 parmData['CANDIDATES'], message = self.validateDomain('Candidates', parmData.get('CANDIDATES', 'No'), ['Yes', 'No'])
                 if not parmData['CANDIDATES']:
@@ -1760,12 +1760,13 @@ class G2CmdShell(cmd.Cmd, object):
                     colorize_msg("Cannot change ID on features", 'error')
                     error_cnt += 1
             else:
-                colorize_msg(f"Cannot {'set' if parmData[parmCode] else 'unset'} {parmCode} on features", 'error')
-                error_cnt += 1
+                if parmData[parmCode] != ftypeRecord.get(parmCode, ''):
+                    colorize_msg(f"Cannot {'set' if parmData[parmCode] else 'unset'} {parmCode} on features", 'error')
+                    error_cnt += 1
         if error_cnt > 0:
             colorize_msg('Errors encountered, feature not updated', 'error')
         elif update_cnt < 1:
-            colorize_msg('No changes detected', 'caution')
+            colorize_msg('No changes detected', 'warning')
         else:
             self.cfgData['G2_CONFIG']['CFG_FTYPE'].remove(old_ftypeRecord)
             self.cfgData['G2_CONFIG']['CFG_FTYPE'].append(ftypeRecord)
@@ -1777,7 +1778,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of registered features
 
         Syntax:
-            listFeatures [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listFeatures [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
@@ -1794,7 +1795,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a specific feature's json configuration
 
         Syntax:
-            getFeature [code or id] [optional_output_format = table, json or jsonl]
+            getFeature [code or id] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
@@ -1802,8 +1803,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'FEATURE', 'FTYPE_ID', 'FTYPE_CODE')
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         ftypeRecord = self.getRecord('CFG_FTYPE', searchField, searchValue)
@@ -1827,7 +1828,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'FEATURE', 'FTYPE_ID', 'FTYPE_CODE')
-        except (ValueError, KeyError) as err:
+        except Exception as err:
             colorize_msg(err, 'error')
             return
 
@@ -1908,7 +1909,7 @@ class G2CmdShell(cmd.Cmd, object):
             parmData['FEATURE'] = parmData['FEATURE'].upper()
             parmData['ELEMENT'] = parmData['ELEMENT'].upper()
         except Exception as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         attrRecord, message = self.lookupAttribute(parmData['ATTRIBUTE'])
@@ -1967,7 +1968,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of registered attributes
 
         Syntax:
-            listAttributes [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listAttributes [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
@@ -1983,7 +1984,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a specific attribute's json configuration
 
         Syntax:
-            getAttribute [code or id] [optional_output_format = table, json or jsonl]
+            getAttribute [code or id] [table|json|jsonl]
 
         Notes:
             If you specify a valid feature, all of its attributes will be displayed
@@ -1995,8 +1996,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'ATTRIBUTE', 'ATTR_ID', 'ATTR_CODE')
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         attrRecord = self.getRecord('CFG_ATTR', searchField, searchValue)
@@ -2021,8 +2022,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'ATTRIBUTE', 'ATTR_ID', 'ATTR_CODE')
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         attrRecord = self.getRecord('CFG_ATTR', searchField, searchValue)
@@ -2107,8 +2108,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         feature = parmData['FEATURE'].upper() if 'FEATURE' in parmData else None
@@ -2214,7 +2215,7 @@ class G2CmdShell(cmd.Cmd, object):
         return
 
 
-# ===== ragments commands =====
+# ===== fragment commands =====
 
     def formatFragmentJson(self, record):
         return {'id': record['ERFRAG_ID'],
@@ -2271,8 +2272,8 @@ class G2CmdShell(cmd.Cmd, object):
             self.validate_parms(parmData, ['FRAGMENT', 'SOURCE'])
             parmData['ID'] = parmData.get('ID', 0)
             parmData['FRAGMENT'] = parmData['FRAGMENT'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         if self.getRecord('CFG_ERFRAG', 'ERFRAG_CODE', parmData['FRAGMENT']):
@@ -2283,6 +2284,9 @@ class G2CmdShell(cmd.Cmd, object):
         if parmData.get('ID') and erfragID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
+
+        if parmData.get('DEPENDS'):
+            colorize_msg('Depends setting ignored as it is calculated by the system', 'warning')
 
         dependencyList, error_message = self.validateFragmentSource(parmData['SOURCE'])
         if error_message:
@@ -2304,10 +2308,10 @@ class G2CmdShell(cmd.Cmd, object):
         Sets configuration parameters for an existing feature
 
         Syntax:
-            setFragment [partial_json_configuration]
+            setFragment {partial_json_configuration}
 
         Examples:
-            setFragment {"fragment": "GNR_CLOSE_NAME", "source": "./SCORES/NAME[(./GNR_FN>=95 ..."}
+            setFragment {"fragment": "GNR_ORG_NAME", "source": "./SCORES/NAME[./GNR_ON>=90]"}
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -2316,8 +2320,8 @@ class G2CmdShell(cmd.Cmd, object):
             parmData = dictKeysUpper(json.loads(arg))
             if not parmData.get('ID') and not parmData.get('FRAGMENT'):
                 raise ValueError('Either ID or FRAGMENT must be supplied')
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         oldRecord, message = self.lookupFragment(parmData['ID'] if parmData.get('ID') else parmData['FRAGMENT'].upper())
@@ -2353,7 +2357,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of rule fragments.
 
         Syntax:
-            listFragments [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listFragments [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
 
@@ -2371,7 +2375,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single rule fragment
 
         Syntax:
-            getFragment [code or id] [optional_output_format = table, json or jsonl]
+            getFragment [code or id] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
@@ -2379,8 +2383,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'FRAGMENT', 'ERFRAG_ID', 'ERFRAG_CODE')
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         fragmentRecord = self.getRecord('CFG_ERFRAG', searchField, searchValue)
@@ -2401,8 +2405,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'FRAGMENT', 'ERFRAG_ID', 'ERFRAG_CODE')
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         fragmentRecord = self.getRecord('CFG_ERFRAG', searchField, searchValue)
@@ -2427,62 +2431,55 @@ class G2CmdShell(cmd.Cmd, object):
                 "fragment": record["QUAL_ERFRAG_CODE"],
                 "disqualifier": record["DISQ_ERFRAG_CODE"],
                 "rtype_id": record["RTYPE_ID"],
-                "tier": record["ERRULE_TIER"]}
+                "tier": record["ERRULE_TIER"] if record["RESOLVE"] == 'Yes' else None}
 
     def validateRule(self, record):
-        errorList = []
-
-        if not isinstance(record['ERRULE_ID'], int):
-            errorList.append('ID must be an integer value')
 
         erfragRecord, message = self.lookupFragment(record['QUAL_ERFRAG_CODE'])
         if not erfragRecord:
-            errorList.append(message)
+            colorize_msg(message, 'error')
+            return None
 
         if record.get('DISQ_ERFRAG_CODE'):
             dqfragRecord, message = self.lookupFragment(record['DISQ_ERFRAG_CODE'])
             if not dqfragRecord:
-                errorList.append(message)
+                colorize_msg(message, 'error')
+                return None
 
         record['RESOLVE'], message = self.validateDomain('resolve', record.get('RESOLVE', 'No'), ['Yes', 'No'])
         if not record['RESOLVE']:
-            errorList.append(message)
+            colorize_msg(message, 'error')
+            return None
 
         record['RELATE'], message = self.validateDomain('relate', record.get('RELATE', 'No'), ['Yes', 'No'])
         if not record['RELATE']:
-            errorList.append(message)
+            colorize_msg(message, 'error')
+            return None
 
         if record['RESOLVE'] == 'Yes' and record['RELATE'] == 'Yes':
-            errorList.append('A rule must either resolve or relate, not both')
+            colorize_msg('A rule must either resolve or relate, please set the other to No', 'error')
+            return None
 
         tier = record.get('ERRULE_TIER')
         rtypeID = record.get('RTYPE_ID')
 
         if record['RESOLVE'] == 'Yes':
             if not tier:
-                errorList.append('A tier matching other rules that could be considered ambiguous to this one must be specified')
-            elif not isinstance(tier, int):
-                errorList.append('The tier value must be an integer matching other rules that could be considered ambiguous to this one')
+                colorize_msg('A tier matching other rules that could be considered ambiguous to this one must be specified', 'error')
+                return None
 
-            if not rtypeID or (not isinstance(rtypeID, int)) or rtypeID != 1:
-                colorize_msg('Relationship type (RTYPE_ID) was forced to 1 for resolve rule', 'caution')
+            if rtypeID != 1:
+                # just do it without making them wonder
+                # colorize_msg('Relationship type (RTYPE_ID) was forced to 1 for resolve rule', 'warning')
                 record['RTYPE_ID'] = 1
 
         if record['RELATE'] == 'Yes':
-            if tier:
-                errorList.append('A tier is not required for relate rules')
-            if not rtypeID or (not isinstance(rtypeID, int)) or rtypeID not in (2, 3, 4):
-                errorList.append('Relationship type (RTYPE_ID) must be set to either 2=Possible match or 3=Possibly related for rules that relate')
-
-        if record.get('REF_SCORE') and not isinstance(record['REF_SCORE'], int):
-            errorList.append('The reference score must be an integer value')
-
-        if errorList:
-            print(colorize("\nThe following errors were detected:", 'bad'))
-            for message in errorList:
-                print(colorize(f"- {message}", 'bad'))
-            record = None
-
+            # leave tier as is as they may change back to resolve and don't want to lose its original setting
+            # if tier:
+            #     colorize_msg('A tier is not required for relate rules', 'error')
+            if rtypeID not in (2, 3, 4):
+                colorize_msg('Relationship type (RTYPE_ID) must be set to either 2=Possible match or 3=Possibly related', 'error')
+                return None
         return record
 
     def do_addRule(self, arg):
@@ -2503,8 +2500,8 @@ class G2CmdShell(cmd.Cmd, object):
             self.validate_parms(parmData, ['ID', 'RULE', 'FRAGMENT', 'RESOLVE', 'RELATE', 'RTYPE_ID'])
             parmData['RULE'] = parmData['RULE'].upper()
             parmData['FRAGMENT'] = parmData['FRAGMENT'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         if self.getRecord('CFG_ERRULE', 'ERRULE_CODE', parmData['RULE']):
@@ -2530,7 +2527,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         newRecord = self.validateRule(newRecord)
         if not newRecord:
-            colorize_msg('Rule not added', 'error')
+            #colorize_msg('Rule not added', 'error')
             return
 
         self.cfgData['G2_CONFIG']['CFG_ERRULE'].append(newRecord)
@@ -2552,8 +2549,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['ID'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         oldRecord, message = self.lookupRule(parmData['ID'])
@@ -2584,7 +2581,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         newRecord = self.validateRule(newRecord)
         if not newRecord:
-            colorize_msg('Rule not updated', 'error')
+            #colorize_msg('Rule not updated', 'error')
             return
 
         self.cfgData['G2_CONFIG']['CFG_ERRULE'].remove(oldRecord)
@@ -2597,7 +2594,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of rules (aka principles)
 
         Syntax:
-            listRules [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listRules [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
 
@@ -2615,7 +2612,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single rule (aka principle)
 
         Syntax:
-            getRule [code or id] [optional_output_format = table, json or jsonl]
+            getRule [code or id] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
@@ -2623,8 +2620,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'RULE', 'ERRULE_ID', 'ERRULE_CODE')
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         ruleRecord = self.getRecord('CFG_ERRULE', searchField, searchValue)
@@ -2645,8 +2642,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'RULE', 'ERRULE_ID', 'ERRULE_CODE')
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         ruleRecord = self.getRecord('CFG_ERRULE', searchField, searchValue)
@@ -2706,8 +2703,8 @@ class G2CmdShell(cmd.Cmd, object):
             parmData['ID'] = parmData.get('ID', 0)
             parmData['EXECORDER'] = parmData.get('EXECORDER', 0)
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         sfcallID = self.checkDesiredRecordID('CFG_SFCALL', 'SFCALL_ID', parmData.get('ID'))
@@ -2761,7 +2758,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of standardization calls.
 
         Syntax:
-            listStandardizationCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listStandardizationCalls [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
 
@@ -2779,7 +2776,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single standarization call
 
         Syntax:
-            getStandardizationCall [id] [optional_output_format = table, json or jsonl]
+            getStandardizationCall [id] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
@@ -2788,8 +2785,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
             self.validate_parms(parmData, ['ID'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         sfcallRecord = self.getRecord('CFG_SFCALL', 'SFCALL_ID', parmData['ID'])
@@ -2811,8 +2808,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
             self.validate_parms(parmData, ['ID'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         sfcallRecord = self.getRecord('CFG_SFCALL', 'SFCALL_ID', parmData['ID'])
@@ -2901,8 +2898,8 @@ class G2CmdShell(cmd.Cmd, object):
             parmData['ID'] = parmData.get('ID', 0)
             parmData['EXECORDER'] = parmData.get('EXECORDER', 0)
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         efcallID = self.checkDesiredRecordID('CFG_EFCALL', 'EFCALL_ID', parmData.get('ID'))
@@ -3023,7 +3020,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of expression calls
 
         Syntax:
-            listExpressionCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listExpressionCalls [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
 
@@ -3041,7 +3038,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single expression call
 
         Syntax:
-            getExpressionCall [id] [optional_output_format = table, json or jsonl]
+            getExpressionCall [id] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
@@ -3050,8 +3047,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
             self.validate_parms(parmData, ['ID'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         efcallRecord = self.getRecord('CFG_EFCALL', 'EFCALL_ID', parmData['ID'])
@@ -3073,8 +3070,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
             self.validate_parms(parmData, ['ID'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         efcallRecord = self.getRecord('CFG_EFCALL', 'EFCALL_ID', parmData['ID'])
@@ -3132,8 +3129,8 @@ class G2CmdShell(cmd.Cmd, object):
             parmData['ID'] = parmData.get('ID', 0)
             parmData['FEATURE'] = parmData['FEATURE'].upper()
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         cfcallID = self.checkDesiredRecordID('CFG_CFCALL', 'CFCALL_ID', parmData.get('ID'))
@@ -3205,7 +3202,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of comparison calls
 
         Syntax:
-            listComparisonCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listComparisonCalls [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
 
@@ -3223,7 +3220,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single comparison call
 
         Syntax:
-            getComparisonCall [id] [optional_output_format = table, json or jsonl]
+            getComparisonCall [id] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
@@ -3232,8 +3229,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
             self.validate_parms(parmData, ['ID'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         cfcallRecord = self.getRecord('CFG_CFCALL', 'CFCALL_ID', parmData['ID'])
@@ -3255,8 +3252,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
             self.validate_parms(parmData, ['ID'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         cfcallRecord = self.getRecord('CFG_CFCALL', 'CFCALL_ID', parmData['ID'])
@@ -3316,8 +3313,8 @@ class G2CmdShell(cmd.Cmd, object):
             parmData['ID'] = parmData.get('ID', 0)
             parmData['FEATURE'] = parmData['FEATURE'].upper()
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         dfcallID = self.checkDesiredRecordID('CFG_DFCALL', 'DFCALL_ID', parmData.get('ID'))
@@ -3389,7 +3386,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of distinctness calls
 
         Syntax:
-            listDistinctCalls [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listDistinctCalls [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
 
@@ -3407,7 +3404,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single distinctness call
 
         Syntax:
-            getDistinctCall [id] [optional_output_format = table, json or jsonl]
+            getDistinctCall [id] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
@@ -3416,8 +3413,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
             self.validate_parms(parmData, ['ID'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         dfcallRecord = self.getRecord('CFG_DFCALL', 'DFCALL_ID', parmData['ID'])
@@ -3439,8 +3436,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
             self.validate_parms(parmData, ['ID'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         dfcallRecord = self.getRecord('CFG_DFCALL', 'DFCALL_ID', parmData['ID'])
@@ -3484,8 +3481,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['CALL_TYPE', 'CALL_ID', 'ELEMENT'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return None
 
         parmData['CALL_TYPE'], message = self.validateDomain('Call type', parmData.get('CALL_TYPE'), ['expression', 'comparison', 'distinct'])
@@ -3567,7 +3564,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(callElementData['error'], 'error')
             return
         if callElementData['bomRecord']:
-            colorize_msg('Feature/element already exists for call', 'caution')
+            colorize_msg('Feature/element already exists for call', 'warning')
             return
 
         newRecord = {}
@@ -3601,7 +3598,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(callElementData['error'], 'error')
             return
         if not callElementData['bomRecord']:
-            colorize_msg('Feature/element not found for call', 'caution')
+            colorize_msg('Feature/element not found for call', 'warning')
             return
 
         self.cfgData['G2_CONFIG'][callElementData['bom_table']].remove(callElementData['bomRecord'])
@@ -3639,8 +3636,8 @@ class G2CmdShell(cmd.Cmd, object):
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['ELEMENT'])
             parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         nameHasher_efcallID = self.getCallID('NAME', 'expression', 'NAME_HASHER')
@@ -3669,8 +3666,8 @@ class G2CmdShell(cmd.Cmd, object):
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['ELEMENT'])
             parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         nameHasher_efcallID = self.getCallID('NAME', 'expression', 'NAME_HASHER')
@@ -3697,7 +3694,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of feature behavior overides
 
         Syntax:
-            listBehaviorOverides [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listBehaviorOverides [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
 
@@ -3727,8 +3724,8 @@ class G2CmdShell(cmd.Cmd, object):
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['FEATURE', 'USAGETYPE', 'BEHAVIOR'])
             parmData['USAGETYPE'] = parmData['USAGETYPE'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
@@ -3743,7 +3740,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         if self.getRecord('CFG_FBOVR', ['FTYPE_ID', 'UTYPE_CODE'], [ftypeID, parmData['USAGETYPE']]):
-            colorize_msg('Behavior override already exists', 'caution')
+            colorize_msg('Behavior override already exists', 'warning')
             return
 
         newRecord = {}
@@ -3772,8 +3769,8 @@ class G2CmdShell(cmd.Cmd, object):
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['FEATURE', 'USAGETYPE'])
             parmData['USAGETYPE'] = parmData['USAGETYPE'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         ftypeRecord, message = self.lookupFeature(parmData['FEATURE'])
@@ -3799,7 +3796,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of generic threshold plans
 
         Syntax:
-            listGenericPlans [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listGenericPlans [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
@@ -3826,8 +3823,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['EXISTINGPLAN', 'NEWPLAN'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         planRecord1, message = self.lookupGenericPlan(parmData['EXISTINGPLAN'])
@@ -3870,8 +3867,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'PLAN', 'GPLAN_ID', 'GPLAN_CODE')
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         planRecord = self.getRecord('CFG_GPLAN', searchField, searchValue)
@@ -3909,7 +3906,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of generic thresholds
 
         Syntax:
-            listGenericThresholds [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listGenericThresholds [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
 
@@ -3963,8 +3960,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['PLAN', 'BEHAVIOR', 'SCORINGCAP', 'CANDIDATECAP', 'SENDTOREDO'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         gplanRecord, message = self.lookupGenericPlan(parmData['PLAN'])
@@ -3982,7 +3979,7 @@ class G2CmdShell(cmd.Cmd, object):
             ftypeID = ftypeRecord['FTYPE_ID']
 
         if self.getRecord('CFG_GENERIC_THRESHOLD', ['GPLAN_ID', 'BEHAVIOR', 'FTYPE_ID'], [gplan_id, parmData['BEHAVIOR'], ftypeID]):
-            colorize_msg('Generic threshold already exists', 'caution')
+            colorize_msg('Generic threshold already exists', 'warning')
             return
 
         newRecord = {}
@@ -4016,8 +4013,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['PLAN', 'BEHAVIOR'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         gplanRecord, message = self.lookupGenericPlan(parmData['PLAN'])
@@ -4036,7 +4033,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         oldRecord = self.getRecord('CFG_GENERIC_THRESHOLD', ['GPLAN_ID', 'BEHAVIOR', 'FTYPE_ID'], [gplan_id, parmData['BEHAVIOR'], ftypeID])
         if not oldRecord:
-            colorize_msg('Generic threshold not found', 'caution')
+            colorize_msg('Generic threshold not found', 'warning')
             return
 
         oldParmData = dictKeysUpper(self.formatGenericThresholdJson(oldRecord))
@@ -4078,8 +4075,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['PLAN', 'BEHAVIOR'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         gplanRecord, message = self.lookupGenericPlan(parmData['PLAN'])
@@ -4098,7 +4095,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         oldRecord = self.getRecord('CFG_GENERIC_THRESHOLD', ['GPLAN_ID', 'BEHAVIOR', 'FTYPE_ID'], [gplan_id, parmData['BEHAVIOR'], ftypeID])
         if not oldRecord:
-            colorize_msg('Generic threshold not found', 'caution')
+            colorize_msg('Generic threshold not found', 'warning')
             return
 
         self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].remove(oldRecord)
@@ -4113,7 +4110,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of internal reference codes
 
         Syntax:
-            listReferenceCodes [optional_code_type] [optional_output_format = table, json or jsonl]
+            listReferenceCodes [code_type] [table|json|jsonl]
 
         Notes:
             reference code types include:
@@ -4199,8 +4196,8 @@ class G2CmdShell(cmd.Cmd, object):
             self.validate_parms(parmData, ['FUNCTION'])
             parmData['ID'] = parmData.get('ID', 0)
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         if self.getRecord('CFG_SFUNC', 'SFUNC_CODE', parmData['FUNCTION']):
@@ -4236,7 +4233,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of standardization functions
 
         Syntax:
-            listStandardizeFunctions [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listStandardizeFunctions [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
@@ -4274,8 +4271,8 @@ class G2CmdShell(cmd.Cmd, object):
             self.validate_parms(parmData, ['FUNCTION'])
             parmData['ID'] = parmData.get('ID', 0)
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         if self.getRecord('CFG_EFUNC', 'EFUNC_CODE', parmData['FUNCTION']):
@@ -4313,7 +4310,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of expression functions
 
         Syntax:
-            listExpressionFuncstions [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listExpressionFuncstions [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
@@ -4354,8 +4351,8 @@ class G2CmdShell(cmd.Cmd, object):
             self.validate_parms(parmData, ['FUNCTION'])
             parmData['ID'] = parmData.get('ID', 0)
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         if self.getRecord('CFG_CFUNC', 'CFUNC_CODE', parmData['FUNCTION']):
@@ -4393,7 +4390,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of comparison functions
 
         Syntax:
-            listComparisonFunctions [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listComparisonFunctions [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
@@ -4453,8 +4450,8 @@ class G2CmdShell(cmd.Cmd, object):
             parmData['LIKELYSCORE'] = int(parmData.get('LIKELYSCORE', 80))
             parmData['PLAUSIBLESCORE'] = int(parmData.get('PLAUSIBLESCORE', 70))
             parmData['UNLIKELYSCORE'] = int(parmData.get('UNLIKELYSCORE', 60))
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         cfrtnID = self.checkDesiredRecordID('CFG_CFRTN', 'CFRTN_ID', parmData.get('ID'))
@@ -4524,8 +4521,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['ID'])
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         oldRecord = self.getRecord('CFG_CFRTN', 'CFRTN_ID', parmData['ID'])
@@ -4560,7 +4557,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of thresholds by comparison function return value
 
         Syntax:
-            listComparisonThresholds [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listComparisonThresholds [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
@@ -4585,8 +4582,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": int(arg)}
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         cfrtnRecord = self.getRecord('CFG_CFRTN', 'CFRTN_ID', parmData['ID'])
@@ -4605,7 +4602,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of distinctness functions
 
         Syntax:
-            listDistinctnessFunctions [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listDistinctnessFunctions [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
@@ -4642,8 +4639,8 @@ class G2CmdShell(cmd.Cmd, object):
             self.validate_parms(parmData, ['FUNCTION'])
             parmData['ID'] = parmData.get('ID', 0)
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         if self.getRecord('CFG_DFUNC', 'DFUNC_CODE', parmData['FUNCTION']):
@@ -4703,8 +4700,8 @@ class G2CmdShell(cmd.Cmd, object):
             self.validate_parms(parmData, ['ELEMENT'])
             parmData['ID'] = parmData.get('ID', 0)
             parmData['ELEMENT'] = parmData['ELEMENT'].upper()
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         if self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT']):
@@ -4741,7 +4738,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the list of elements.
 
         Syntax:
-            listElements [optional_search_filter] [optional_output_format = table, json or jsonl]
+            listElements [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
 
@@ -4759,7 +4756,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single element
 
         Syntax:
-            getElement [code or id] [optional_output_format = table, json or jsonl]
+            getElement [code or id] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
@@ -4767,8 +4764,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'ELEMENT', 'FELEM_ID', 'FELEM_CODE')
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         elementRecord = self.getRecord('CFG_FELEM', searchField, searchValue)
@@ -4789,8 +4786,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             searchValue, searchField = self.id_or_code_parm(arg, 'ID', 'ELEMENT', 'FELEM_ID', 'FELEM_CODE')
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         elementRecord = self.getRecord('CFG_FELEM', searchField, searchValue)
@@ -4818,8 +4815,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         this_version = self.cfgData['G2_CONFIG']['CONFIG_BASE_VERSION']['COMPATIBILITY_VERSION']['CONFIG_VERSION']
@@ -4842,8 +4839,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         this_version = self.cfgData['G2_CONFIG']['CONFIG_BASE_VERSION']['COMPATIBILITY_VERSION']['CONFIG_VERSION']
@@ -4887,8 +4884,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = json.loads(arg)  # don't want these upper
-        except (ValueError, KeyError) as err:
-            colorize_msg(f'Syntax error: {err}', 'error')
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
             return
 
         # not really expecting a list here, getting the dictionary key they used
