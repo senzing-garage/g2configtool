@@ -1226,7 +1226,7 @@ class G2CmdShell(cmd.Cmd, object):
         Register a new data source
 
         Syntax:
-            addDataSource [dataSourceCode]
+            addDataSource dataSourceCode
 
         Examples:
             addDataSource CUSTOMER
@@ -2043,7 +2043,7 @@ class G2CmdShell(cmd.Cmd, object):
         Adds a feature and its attributes based on a template
 
         Syntax:
-            templateAdd {"feature": "<name>", "template": "<template>", "behavior": "<optional-override>", "comparison": "<optional-override>}
+            templateAdd {"feature": "my_name", "template": "template_code", "behavior": "optional-override", "comparison": "optional-override"}
 
         Examples:
             templateAdd {"feature": "customer_number", "template": "global_id"}
@@ -2537,7 +2537,7 @@ class G2CmdShell(cmd.Cmd, object):
     def do_setRule(self, arg):
         """
         Syntax:
-            setRule <partial json configuration>
+            setRule {partial json configuration}
 
         Examples:
             setRule {"id": 111, "resolve": "No"}
@@ -2776,7 +2776,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single standarization call
 
         Syntax:
-            getStandardizationCall [id] [table|json|jsonl]
+            getStandardizationCall id [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
@@ -2784,6 +2784,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
+            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
             self.validate_parms(parmData, ['ID'])
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
@@ -2800,13 +2801,14 @@ class G2CmdShell(cmd.Cmd, object):
         Deletes a standardization call
 
         Syntax:
-            deleteStandardizationCall [id]
+            deleteStandardizationCall id
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
+            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
             self.validate_parms(parmData, ['ID'])
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
@@ -3038,7 +3040,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single expression call
 
         Syntax:
-            getExpressionCall [id] [table|json|jsonl]
+            getExpressionCall id [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
@@ -3046,6 +3048,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
+            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
             self.validate_parms(parmData, ['ID'])
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
@@ -3062,13 +3065,14 @@ class G2CmdShell(cmd.Cmd, object):
         Deletes an expression call
 
         Syntax:
-            deleteExpressionCall [id]
+            deleteExpressionCall id
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
+            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
             self.validate_parms(parmData, ['ID'])
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
@@ -3220,7 +3224,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single comparison call
 
         Syntax:
-            getComparisonCall [id] [table|json|jsonl]
+            getComparisonCall id [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
@@ -3228,6 +3232,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
+            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
             self.validate_parms(parmData, ['ID'])
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
@@ -3244,13 +3249,14 @@ class G2CmdShell(cmd.Cmd, object):
         Deletes a comparison call
 
         Syntax:
-            deleteComparisonCall [id]
+            deleteComparisonCall id
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
+            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
             self.validate_parms(parmData, ['ID'])
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
@@ -3338,7 +3344,7 @@ class G2CmdShell(cmd.Cmd, object):
         if not dfuncRecord:
             colorize_msg(message, 'warning')
             return
-        cfuncID = dfuncRecord['CFUNC_ID']
+        dfuncID = dfuncRecord['DFUNC_ID']
 
         # ensure we have valid elements
         dfbomRecordList = []
@@ -3374,7 +3380,7 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord = {}
         newRecord['DFCALL_ID'] = dfcallID
         newRecord['FTYPE_ID'] = ftypeID
-        newRecord['CFUNC_ID'] = cfuncID
+        newRecord['DFUNC_ID'] = dfuncID
         newRecord['EXEC_ORDER'] = parmData['EXECORDER']
         self.cfgData['G2_CONFIG']['CFG_DFCALL'].append(newRecord)
         self.cfgData['G2_CONFIG']['CFG_DFBOM'].extend(dfbomRecordList)
@@ -3404,7 +3410,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single distinctness call
 
         Syntax:
-            getDistinctCall [id] [table|json|jsonl]
+            getDistinctCall id [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
@@ -3412,6 +3418,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
+            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
             self.validate_parms(parmData, ['ID'])
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
@@ -3428,13 +3435,14 @@ class G2CmdShell(cmd.Cmd, object):
         Deletes a distintness call
 
         Syntax:
-            deleteDistinctCall [id]
+            deleteDistinctCall id
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
+            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
             self.validate_parms(parmData, ['ID'])
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
@@ -3620,9 +3628,6 @@ class G2CmdShell(cmd.Cmd, object):
         """
         Add an additional feature/element to the list composite name keys
 
-        Syntax:
-            addToNamehash {"feature": "<feature>", "element": "<element>"}
-
         Example:
             addToNamehash {"feature": "ADDRESS", "element": "STR_NUM"}
 
@@ -3652,9 +3657,6 @@ class G2CmdShell(cmd.Cmd, object):
     def do_deleteFromNamehash(self, arg):
         """
         Delete a feature element from the list composite name keys
-
-        Syntax:
-            deleteFromNamehash {"feature": "<feature>", "element": "<element>"}
 
         Example:
             deleteFromNamehash {"feature": "ADDRESS", "element": "STR_NUM"}
@@ -3723,7 +3725,9 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['FEATURE', 'USAGETYPE', 'BEHAVIOR'])
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
             parmData['USAGETYPE'] = parmData['USAGETYPE'].upper()
+            parmData['BEHAVIOR'] = parmData['BEHAVIOR'].upper()
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
             return
@@ -3759,12 +3763,12 @@ class G2CmdShell(cmd.Cmd, object):
         """
         Deletes a behavior overide
 
-        Syntax:
-            deleteBehaviorOveride {"feature": "<feature>", "usageType": "<usageType>"}
-
         Example:
             deleteBehaviorOveride {"feature": "PHONE", "usageType": "MOBILE"}
         """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
         try:
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['FEATURE', 'USAGETYPE'])
@@ -3811,9 +3815,6 @@ class G2CmdShell(cmd.Cmd, object):
         """
         Create a new generic plan based on an existing one
 
-        Syntax:
-            cloneGenericPlan {"existingPlan": "<plan>", "newPlan": "<plan>", "description": "<describe plan>"}
-
         Examples:
             cloneGenericPlan {"existingPlan": "SEARCH", "newPlan": "SEARCH-EXHAUSTIVE", "description": "Exhaustive search"}
         """
@@ -3823,6 +3824,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['EXISTINGPLAN', 'NEWPLAN'])
+            parmData['EXISTINGPLAN'] = parmData['EXISTINGPLAN'].upper()
+            parmData['NEWPLAN'] = parmData['NEWPLAN'].upper()
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
             return
@@ -3960,6 +3963,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['PLAN', 'BEHAVIOR', 'SCORINGCAP', 'CANDIDATECAP', 'SENDTOREDO'])
+            parmData['PLAN'] = parmData['PLAN'].upper()
+            parmData['BEHAVIOR'] = parmData['BEHAVIOR'].upper()
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
             return
@@ -4002,10 +4007,10 @@ class G2CmdShell(cmd.Cmd, object):
         Sets the comparison thresholds for a particular comparison threshold ID
 
         Syntax:
-            setGenericThreshold {json_configuration}
+            setGenericThreshold {partial_json_configuration}
 
         Example:
-            setGenericThreshold {"plan": "search", "feature": "all", "behavior": "NAME", "candidateCap": 500}
+            setGenericThreshold {"plan": "SEARCH", "feature": "all", "behavior": "NAME", "candidateCap": 500}
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -4013,6 +4018,8 @@ class G2CmdShell(cmd.Cmd, object):
         try:
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['PLAN', 'BEHAVIOR'])
+            parmData['PLAN'] = parmData['PLAN'].upper()
+            parmData['BEHAVIOR'] = parmData['BEHAVIOR'].upper()
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
             return
@@ -4062,9 +4069,6 @@ class G2CmdShell(cmd.Cmd, object):
     def do_deleteGenericThreshold(self, arg):
         """
         Deletes a generic threshold record
-
-        Syntax:
-            deleteGenericThreshold {json_configuration}
 
         Example:
             deleteGenericThreshold {"plan": "search", "feature": "all", "behavior": "NAME"}
@@ -4186,7 +4190,7 @@ class G2CmdShell(cmd.Cmd, object):
             see listStandardizationFunctions for examples of json_configurations
 
         Caution:
-            Added a new function requires a plugin to be programmed!
+            Adding a new function requires a plugin to be programmed!
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -4442,7 +4446,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
-            self.validate_parms(parmData, ['ID', 'FUNCTION', 'SCORENAME'])
+            self.validate_parms(parmData, ['FUNCTION', 'SCORENAME'])
+            parmData['ID'] = parmData.get('ID', 0)
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
             parmData['SCORENAME'] = parmData['SCORENAME'].upper()
             parmData['SAMESCORE'] = int(parmData.get('SAMESCORE', 100))
@@ -4475,7 +4480,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         cfcallRecord = self.getRecord('CFG_CFRTN', ['CFUNC_ID', 'CFUNC_RTNVAL', 'FTYPE_ID'], [cfuncID, parmData['SCORENAME'], ftypeID])
         if cfcallRecord:
-            colorize_msg(f"Comparison threshold for {parmData['FUNCTION']}-{parmData['SCORENAME']}-{parmData['FEATURE']} already set", 'warning')
+            colorize_msg(f"Comparison threshold function: {parmData['FUNCTION']}, return code: {parmData['SCORENAME']} for feature {parmData['FEATURE']} already set", 'warning')
             return
 
         # see if the return value already has an exec order and use it! must be in the expected order
@@ -4507,7 +4512,7 @@ class G2CmdShell(cmd.Cmd, object):
         Sets the comparison thresholds for a particular comparison threshold ID
 
         Syntax:
-            setComparisonThreshold {json_configuration}
+            setComparisonThreshold {partial_json_configuration}
 
         Example:
             setComparisonThreshold {"id": 9, "sameScore": 100, "closeScore": 92, "likelyScore": 90, "plausibleScore": 85, "unlikelyScore": 75}
@@ -4531,7 +4536,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         oldParmData = dictKeysUpper(self.formatComparisonThresholdJson(oldRecord))
-        settable_parm_list = ('SAMESCORE', 'CLOSESCORE', 'LIKELYSCORE', 'PLAUSIBLESCORE', 'UNLIKELYSCORE')
+        settable_parm_list = ('RETURNORDER', 'SAMESCORE', 'CLOSESCORE', 'LIKELYSCORE', 'PLAUSIBLESCORE', 'UNLIKELYSCORE')
         newParmData = self.settable_parms(oldParmData, parmData, settable_parm_list)
         if newParmData.get('errors'):
             colorize_msg(newParmData['errors'], 'error')
@@ -4541,6 +4546,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         newRecord = dict(oldRecord) # must use dict to create a new instance
+        newRecord['EXEC_ORDER'] = parmData['RETURNORDER']
         newRecord['SAME_SCORE'] = parmData['SAMESCORE']
         newRecord['CLOSE_SCORE'] = parmData['CLOSESCORE']
         newRecord['LIKELY_SCORE'] = parmData['LIKELYSCORE']
@@ -4575,13 +4581,15 @@ class G2CmdShell(cmd.Cmd, object):
         Deletes a comparision threshold
 
         Syntax:
-           deleteComparisonThreshold [id]
+           deleteComparisonThreshold id
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
             parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": int(arg)}
+            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
+            self.validate_parms(parmData, ['ID'])
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
             return
@@ -4917,7 +4925,7 @@ class G2CmdShell(cmd.Cmd, object):
         self.configUpdated = True
         print()
 
-    # ===== Class Utils =====
+# ===== Class Utils =====
 
     def print_json_record(self, json_obj):
         if type(json_obj) not in [dict, list]:
@@ -5002,6 +5010,25 @@ class G2CmdShell(cmd.Cmd, object):
         less.wait()
         print()
 
+
+# ===== Deprecated/replaced commands =====
+
+    # addStandardizeFunc              replaced with addStandardizeFunction
+    # addExpressionFunc               replaced with addExpressionFunction
+    # addComparisonFunc               replaced with addComparisonFunction
+
+    # addFeatureDistinctCallElement   replaced with addCallElement
+    # addFeatureComparisonElement     replaced with addCallElement
+    # deleteFeatureComparisonElement  replaced with deleteCallElement
+
+    # deleteFeatureDistinctCall       replaced with deleteDistinctCall
+
+    # addFeatureComparison            replaced with addComparisonCall
+    # deleteFeatureComparison         replaced with deleteComparisonCall
+
+    # setFeatureComparison            replaced with deleteComparisonCall and addComparisonCall
+
+    # setDistinctOff                  replaced with deleteDistinctCall for each feature
 
 # ===== Utility functions =====
 
