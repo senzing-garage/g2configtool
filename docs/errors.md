@@ -1,1 +1,1 @@
-## Errors
+# g2configtool errors

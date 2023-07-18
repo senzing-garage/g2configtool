@@ -6,6 +6,7 @@ disable=
     bad-continuation,
     bad-option-value,
     broad-except,
+    broad-exception-raised,
     consider-using-dict-items,
     consider-using-enumerate,
     consider-using-f-string,
