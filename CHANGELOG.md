@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2.3.1] - 2023-09-05
+
+### Changed in 2.3.1
+
+- fixed issue #112 where importFromFile did not trigger config updated flag
+
+
 ## [2.3.0] - 2023-07-18
 
 ### Changed in 2.3.0
@@ -17,7 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - comparison thresholds
     - clone generic plans
 - issues: #106, #98, #97,#95, #86, #76, #30
-
 
 ## [2.2.5] - 2023-05-11
 
