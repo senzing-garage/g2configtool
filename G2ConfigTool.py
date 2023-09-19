@@ -227,16 +227,16 @@ class G2CmdShell(cmd.Cmd, object):
 
         self.json_attr_types = {'ID':'integer',
                                 'EXECORDER': 'integer',
-                                'DATASOURCE': 'string|25',
-                                'FEATURE': 'string|25',
-                                'ELEMENT': 'string|25',
-                                'ATTRIBUTE': 'string|25',
-                                'FRAGMENT': 'string|25',
-                                'RULE': 'string|25',
+                                'DATASOURCE': 'string|255',
+                                'FEATURE': 'string|255',
+                                'ELEMENT': 'string|255',
+                                'ATTRIBUTE': 'string|255',
+                                'FRAGMENT': 'string|255',
+                                'RULE': 'string|255',
                                 'TIER': 'integer',
                                 'RTYPEID': 'integer',
                                 'REF_SCORE': 'integer',
-                                'FUNCTION': 'string|25'}
+                                'FUNCTION': 'string|255'}
 
         # Setup for pretty printing
         Colors.set_theme('DEFAULT')
