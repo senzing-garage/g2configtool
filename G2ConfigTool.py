@@ -227,16 +227,18 @@ class G2CmdShell(cmd.Cmd, object):
 
         self.json_attr_types = {'ID':'integer',
                                 'EXECORDER': 'integer',
-                                'DATASOURCE': 'string|25',
-                                'FEATURE': 'string|25',
-                                'ELEMENT': 'string|25',
-                                'ATTRIBUTE': 'string|25',
-                                'FRAGMENT': 'string|25',
-                                'RULE': 'string|25',
+                                'DATASOURCE': 'string|255',
+                                'FEATURE': 'string|255',
+                                'ELEMENT': 'string|255',
+                                'ATTRIBUTE': 'string|255',
+                                'FRAGMENT': 'string|255',
+                                'RULE': 'string|255',
                                 'TIER': 'integer',
                                 'RTYPEID': 'integer',
                                 'REF_SCORE': 'integer',
-                                'FUNCTION': 'string|25'}
+                                'FUNCTION': 'string|255',
+                                'SECTION': 'string|255',
+                                'FIELD': 'string|255'}
 
         # Setup for pretty printing
         Colors.set_theme('DEFAULT')
@@ -518,7 +520,7 @@ class G2CmdShell(cmd.Cmd, object):
             code_list.append(self.cfgData["G2_CONFIG"][table][i][field])
         return code_list
 
-    def complete_getConfigTable(self, text, line, begidx, endidx):
+    def complete_getConfigSection(self, text, line, begidx, endidx):
         return [section for section in self.cfgData["G2_CONFIG"].keys() if section.lower().startswith(text.lower())]
 
 
@@ -841,30 +843,6 @@ class G2CmdShell(cmd.Cmd, object):
             self.print_json_record(json.loads(response.decode())['CONFIGS'])
         except G2Exception as err:
             colorize_msg(err, 'error')
-
-    def do_getConfigTable(self, arg):
-        """
-        Returns the json configuration for a specific configuration table
-
-        Syntax:
-            getConfigTable [table name]
-
-        Examples:
-            getConfigTable CFG_CFUNC
-
-        Caution:
-            These listings will only be understood by Senzing engineers
-        """
-        arg = self.check_arg_for_output_format('record', arg) # checking for list here even though a get as it
-        if not arg:
-            self.do_help(sys._getframe(0).f_code.co_name)
-            return
-
-        arg = arg.upper()
-        if self.cfgData["G2_CONFIG"].get(arg):
-            self.print_json_lines(self.cfgData["G2_CONFIG"][arg])
-        else:
-            colorize_msg(f'Config table {arg} not found', 'error')
 
     def do_reloadConfig(self, arg):
         """
@@ -4873,6 +4851,73 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Compatibility version is {this_version}', 'success')
         except KeyError:
             colorize_msg('Could not retrieve compatibility version', 'error')
+
+    # ===== config sections =====
+
+    def do_getConfigSection(self, arg):
+        """
+        Returns the json configuration for a specific configuration table
+
+        Syntax:
+            getConfigSection [section name]
+
+        Examples:
+            getConfigSection CFG_CFUNC
+
+        Caution:
+            This command should only be used by Senzing engineers
+        """
+        arg = self.check_arg_for_output_format('list', arg) # checking for list here even though a get as it
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+
+        arg = arg.upper()
+        if self.cfgData["G2_CONFIG"].get(arg):
+            self.print_json_lines(self.cfgData["G2_CONFIG"][arg])
+        else:
+            colorize_msg(f'Config table {arg} not found', 'error')
+
+    def do_addConfigSectionField(self, arg):
+        """
+        Adds a new field to an existing configuration section
+
+        Syntax:
+            addConfigSectionField {json_configuration}
+
+        Caution:
+            This command should only be used by Senzing engineers
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.validate_parms(parmData, ['SECTION', 'FIELD', 'VALUE'])
+            parmData['SECTION'] = parmData['SECTION'].upper()
+            parmData['FIELD'] = parmData['FIELD'].upper()
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
+            return
+
+        if parmData['SECTION'] not in self.cfgData['G2_CONFIG']:
+            colorize_msg('Configuration section does not exist', 'error')
+            return
+
+        # update every record that needs it
+        existed_cnt = updated_cnt = 0
+        for i in range(len(self.cfgData['G2_CONFIG'][parmData['SECTION']])):
+            if parmData['FIELD'] in self.cfgData['G2_CONFIG'][parmData['SECTION']][i]:
+                existed_cnt += 1
+            else:
+                self.cfgData['G2_CONFIG'][parmData['SECTION']][i][parmData['FIELD']] = parmData['VALUE']
+                updated_cnt += 1
+
+        if existed_cnt > 0:
+            colorize_msg(f"Field already existed on {existed_cnt} records", 'warning')
+        if updated_cnt > 0:
+            self.configUpdated = True
+            colorize_msg(f"Field successfully added to {updated_cnt} records!", 'success')
 
     # ===== system parameters  =====
 
