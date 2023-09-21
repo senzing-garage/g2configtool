@@ -206,7 +206,7 @@ class G2CmdShell(cmd.Cmd, object):
         self.doc_header = 'Configuration Command List'
         self.misc_header = 'Help Topics (help <topic>)'
         self.undoc_header = 'Misc Commands'
-        self.__hidden_methods = ('do_EOF', 'do_help')
+        self.__hidden_methods = ('do_EOF', 'do_help', 'do_addStandardizeFunc', 'do_addExpressionFunc', 'do_addComparisonFunc')
         self.g2_configmgr = G2ConfigMgr()
         self.g2_config = G2Config()
 
@@ -351,7 +351,7 @@ class G2CmdShell(cmd.Cmd, object):
             listAttributes          {colorize('<- to see all the attributes you can map to', 'dim')}
 
         {colorize('Principles (rules, scores, and thresholds):', 'highlight2')}
-            listFunctions           {colorize('<- to see all the standardization, expression and comparison functions possible', 'dim')}
+            listFunctions           {colorize('<- to see all the standardize, expression and comparison functions possible', 'dim')}
             listGenericThresholds   {colorize('<- to see all the thresholds for when feature values go generic for candidates or scoring', 'dim')}
             listRules               {colorize('<- to see all the principles in the order they are evaluated', 'dim')}
             listFragments           {colorize('<- to see all the fragments of rules are configured, such as what is considered close_name', 'dim')}
@@ -1012,7 +1012,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         desired_id = value
         id_taken = False
-        last_id = kwargs.get('seed_order', 1000)
+        last_id = kwargs.get('seed_order', 0)
         for record in self.cfgData['G2_CONFIG'][table]:
             senior_key_match = True
             for i in range(len(senior_field)):
@@ -1054,7 +1054,7 @@ class G2CmdShell(cmd.Cmd, object):
             if felemRecord:
                 fbomRecord = self.getRecord('CFG_FBOM', ['FTYPE_ID', 'FELEM_ID'], [ftypeRecord['FTYPE_ID'], felemRecord['FELEM_ID']])
                 if fbomRecord:
-                    return fbomRecord, None
+                    return fbomRecord, f'Element "{element}" is already a feature of "{feature}"'
             return None, f'{element} is not an element of {feature} (use command "getFeature {feature}" to see its elements)'
 
     def lookupFeatureClass(self, featureClass):
@@ -1070,7 +1070,7 @@ class G2CmdShell(cmd.Cmd, object):
         else:
             return False, f'Behavior code "{behaviorCode}" not found (use command "listReferenceCodes behaviorCodes" to see the list)'
 
-    def lookupStandardizationFunction(self, standardizeFunction):
+    def lookupStandardizeFunction(self, standardizeFunction):
         funcRecord = self.getRecord('CFG_SFUNC', 'SFUNC_CODE', standardizeFunction)
         if funcRecord:
             return funcRecord, f'Standardize function "{standardizeFunction}" exists"'
@@ -1091,12 +1091,12 @@ class G2CmdShell(cmd.Cmd, object):
         else:
             return False, f'Comparison function "{comparisonFunction}" not found (use command "listComparisonFunctions" to see the list)'
 
-    def lookupDistinctnessFunction(self, distinctFunction):
+    def lookupDistinctFunction(self, distinctFunction):
         funcRecord = self.getRecord('CFG_DFUNC', 'DFUNC_CODE', distinctFunction)
         if funcRecord:
-            return funcRecord, f'Distinctness function "{distinctFunction}" exists"'
+            return funcRecord, f'Distinct function "{distinctFunction}" exists"'
         else:
-            return False, f'Distinctness function "{distinctFunction}" not found (use command "listDistinctnessFunctions" to see the list)'
+            return False, f'Distinct function "{distinctFunction}" not found (use command "listDistinctFunctions" to see the list)'
 
     def validateDomain(self, attr, value, domain_list):
         if not value:
@@ -1230,7 +1230,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(message, 'warning')
             return
 
-        next_id = self.checkDesiredRecordID('CFG_DSRC', 'DSRC_ID', parmData.get('ID'))
+        next_id = self.checkDesiredRecordID('CFG_DSRC', 'DSRC_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and next_id != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -1256,7 +1256,7 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['CONVERSATIONAL'] = parmData['CONVERSATIONAL']
         self.cfgData['G2_CONFIG']['CFG_DSRC'].append(newRecord)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Data source successfully added!', 'success')
 
     def do_listDataSources(self, arg):
         """
@@ -1302,7 +1302,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         self.cfgData['G2_CONFIG']['CFG_DSRC'].remove(dsrcRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Data source successfully deleted!', 'success')
         self.configUpdated = True
 
 
@@ -1316,7 +1316,7 @@ class G2CmdShell(cmd.Cmd, object):
         efcallRecordList = self.getRecordList('CFG_EFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
         cfcallRecordList = self.getRecordList('CFG_CFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
         # while rare, there can be multiple comparison, the first one can be added with the feature,
-        #    the second must be added with addStandardizationCall, addExpressionCall, addComparisonCall
+        #    the second must be added with addStandardizeCall, addExpressionCall, addComparisonCall
         sfcallRecord = sorted(sfcallRecordList, key=lambda k: k['EXEC_ORDER'])[0] if sfcallRecordList else {}
         efcallRecord = sorted(efcallRecordList, key=lambda k: k['EXEC_ORDER'])[0] if efcallRecordList else {}
         cfcallRecord = sorted(cfcallRecordList, key=lambda k: k['EXEC_ORDER'])[0] if cfcallRecordList else {}
@@ -1395,7 +1395,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(message, 'warning')
             return
 
-        next_id = self.checkDesiredRecordID('CFG_FTYPE', 'FTYPE_ID', parmData.get('ID'))
+        next_id = self.checkDesiredRecordID('CFG_FTYPE', 'FTYPE_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and next_id != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -1445,7 +1445,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         sfuncID = 0
         if parmData.get('STANDARDIZE'):
-            sfuncRecord, message = self.lookupStandardizationFunction(parmData['STANDARDIZE'])
+            sfuncRecord, message = self.lookupStandardizeFunction(parmData['STANDARDIZE'])
             if not sfuncRecord:
                 colorize_msg(message, 'error')
                 return
@@ -1505,10 +1505,10 @@ class G2CmdShell(cmd.Cmd, object):
 
         self.cfgData['G2_CONFIG']['CFG_FTYPE'].append(newRecord)
 
-        # add the standardization call
+        # add the standardize call
         sfcallID = 0
         if sfuncID > 0:
-            sfcallID = self.checkDesiredRecordID('CFG_SFCALL', 'SFCALL_ID', 0)
+            sfcallID = self.checkDesiredRecordID('CFG_SFCALL', 'SFCALL_ID', 0, seed_order=1000)
             newRecord = {}
             newRecord['SFCALL_ID'] = sfcallID
             newRecord['SFUNC_ID'] = sfuncID
@@ -1521,7 +1521,7 @@ class G2CmdShell(cmd.Cmd, object):
         dfcallID = 0
         dfuncID = 0
         if dfuncID > 0:
-            dfcallID = self.checkDesiredRecordID('CFG_DFCALL', 'DFCALL_ID', 0)
+            dfcallID = self.checkDesiredRecordID('CFG_DFCALL', 'DFCALL_ID', 0, seed_order=1000)
             newRecord = {}
             newRecord['DFCALL_ID'] = dfcallID
             newRecord['DFUNC_ID'] = dfuncID
@@ -1532,7 +1532,7 @@ class G2CmdShell(cmd.Cmd, object):
         # add the expression call
         efcallID = 0
         if efuncID > 0:
-            efcallID = self.checkDesiredRecordID('CFG_EFCALL', 'EFCALL_ID', 0)
+            efcallID = self.checkDesiredRecordID('CFG_EFCALL', 'EFCALL_ID', 0, seed_order=1000)
             newRecord = {}
             newRecord['EFCALL_ID'] = efcallID
             newRecord['EFUNC_ID'] = efuncID
@@ -1546,7 +1546,7 @@ class G2CmdShell(cmd.Cmd, object):
         # add the comparison call
         cfcallID = 0
         if cfuncID > 0:
-            cfcallID = self.checkDesiredRecordID('CFG_CFCALL', 'CFCALL_ID', 0)
+            cfcallID = self.checkDesiredRecordID('CFG_CFCALL', 'CFCALL_ID', 0, seed_order=1000)
             newRecord = {}
             newRecord['CFCALL_ID'] = cfcallID
             newRecord['CFUNC_ID'] = cfuncID
@@ -1573,7 +1573,7 @@ class G2CmdShell(cmd.Cmd, object):
             if felemRecord:
                 felemID = felemRecord['FELEM_ID']
             else:
-                felemID = self.checkDesiredRecordID('CFG_FELEM', 'FELEM_ID', 0)
+                felemID = self.checkDesiredRecordID('CFG_FELEM', 'FELEM_ID', 0, seed_order=1000)
                 newRecord = {}
                 newRecord['FELEM_ID'] = felemID
                 newRecord['FELEM_CODE'] = elementRecord['ELEMENT']
@@ -1626,7 +1626,7 @@ class G2CmdShell(cmd.Cmd, object):
             self.cfgData['G2_CONFIG']['CFG_FBOM'].append(newRecord)
 
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Feature successfully added!', 'success')
 
     def do_setFeature(self, arg):
         """
@@ -1641,7 +1641,7 @@ class G2CmdShell(cmd.Cmd, object):
         Caution:
             - Not everything about a feature can be set here. Some changes will require a delete and re-add of the
               feature. For instance, you cannot change a feature's ID or its list of elements.
-            - Standardization, expression and comparison routines cannot be changed here.  However, you can
+            - Standardize, expression and comparison routines cannot be changed here.  However, you can
               use their call commands to make changes. e.g, deleteExpressionCall, addExpressionCall, etc.
         """
         if not arg:
@@ -1749,7 +1749,7 @@ class G2CmdShell(cmd.Cmd, object):
         else:
             self.cfgData['G2_CONFIG']['CFG_FTYPE'].remove(old_ftypeRecord)
             self.cfgData['G2_CONFIG']['CFG_FTYPE'].append(ftypeRecord)
-            colorize_msg('Successfully updated!', 'success')
+            colorize_msg('Feature successfully updated!', 'success')
             self.configUpdated = True
 
     def do_listFeatures(self, arg):
@@ -1846,7 +1846,7 @@ class G2CmdShell(cmd.Cmd, object):
             self.cfgData['G2_CONFIG']['CFG_DFCALL'].remove(dfcallRecord)
 
         self.cfgData['G2_CONFIG']['CFG_FTYPE'].remove(ftypeRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Feature successfully deleted!', 'success')
         self.configUpdated = True
 
 
@@ -1940,7 +1940,7 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['INTERNAL'] = parmData['INTERNAL']
         self.cfgData['G2_CONFIG']['CFG_ATTR'].append(newRecord)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Attribute successfully added!', 'success')
 
     def do_listAttributes(self, arg):
         """
@@ -2011,7 +2011,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         self.cfgData['G2_CONFIG']['CFG_ATTR'].remove(attrRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Attribute successfully deleted!', 'success')
         self.configUpdated = True
 
 
@@ -2280,7 +2280,7 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['ERFRAG_DEPENDS'] = ','.join(dependencyList) if dependencyList else None
         self.cfgData['G2_CONFIG']['CFG_ERFRAG'].append(newRecord)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Fragment successfully added!', 'success')
 
     def do_setFragment(self, arg):
         """
@@ -2328,7 +2328,7 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['ERFRAG_DEPENDS'] = ','.join(dependencyList) if dependencyList else None
         self.cfgData['G2_CONFIG']['CFG_ERFRAG'].remove(oldRecord)
         self.cfgData['G2_CONFIG']['CFG_ERFRAG'].append(newRecord)
-        colorize_msg('Successfully updated!', 'success')
+        colorize_msg('Fragment successfully updated!', 'success')
         self.configUpdated = True
 
     def do_listFragments(self, arg):
@@ -2394,7 +2394,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         self.cfgData['G2_CONFIG']['CFG_ERFRAG'].remove(fragmentRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Fragment successfully deleted!', 'success')
         self.configUpdated = True
 
 
@@ -2511,7 +2511,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         self.cfgData['G2_CONFIG']['CFG_ERRULE'].append(newRecord)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Rule successfully added!', 'success')
 
     def do_setRule(self, arg):
         """
@@ -2565,7 +2565,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         self.cfgData['G2_CONFIG']['CFG_ERRULE'].remove(oldRecord)
         self.cfgData['G2_CONFIG']['CFG_ERRULE'].append(newRecord)
-        colorize_msg('Successfully updated!', 'success')
+        colorize_msg('Rule successfully updated!', 'success')
         self.configUpdated = True
 
     def do_listRules(self, arg):
@@ -2631,13 +2631,13 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         self.cfgData['G2_CONFIG']['CFG_ERRULE'].remove(ruleRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Rule successfully deleted!', 'success')
         self.configUpdated = True
 
 
-# ===== standardization call commands =====
+# ===== standardize call commands =====
 
-    def formatStandardizationCallJson(self, sfcallRecord):
+    def formatStandardizeCallJson(self, sfcallRecord):
         sfcallID = sfcallRecord['SFCALL_ID']
 
         ftypeRecord1 = self.getRecord('CFG_FTYPE', 'FTYPE_ID', sfcallRecord['FTYPE_ID'])
@@ -2662,15 +2662,15 @@ class G2CmdShell(cmd.Cmd, object):
 
         return sfcallData
 
-    def do_addStandardizationCall(self, arg):
+    def do_addStandardizeCall(self, arg):
         """
-        Add a new standardization call
+        Add a new standardize call
 
         Syntax:
-            addStandardizationCall {json_configuration}
+            addStandardizeCall {json_configuration}
 
         Examples:
-            see listStandardizationCalls or getStandardizationCall for examples of json_configurations
+            see listStandardizeCalls or getStandardizeCall for examples of json_configurations
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -2686,7 +2686,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Command error: {err}', 'error')
             return
 
-        sfcallID = self.checkDesiredRecordID('CFG_SFCALL', 'SFCALL_ID', parmData.get('ID'))
+        sfcallID = self.checkDesiredRecordID('CFG_SFCALL', 'SFCALL_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and sfcallID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -2711,12 +2711,12 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Either a feature or an element must be specified, but not both', 'error')
             return
 
-        sfcallOrder = self.checkDesiredRecordID('CFG_SFCALL', ['FTYPE_ID', 'FELEM_ID', 'EXEC_ORDER'], [ftypeID, felemID, parmData.get('EXECORDER')], seed_order = 0)
+        sfcallOrder = self.checkDesiredRecordID('CFG_SFCALL', ['FTYPE_ID', 'FELEM_ID', 'EXEC_ORDER'], [ftypeID, felemID, parmData.get('EXECORDER')])
         if parmData['EXECORDER'] and sfcallOrder != parmData['EXECORDER']:
             colorize_msg('The specified execution order for the feature/element is already taken', 'error')
             return
 
-        sfuncRecord, message = self.lookupStandardizationFunction(parmData['FUNCTION'])
+        sfuncRecord, message = self.lookupStandardizeFunction(parmData['FUNCTION'])
         if not sfuncRecord:
             colorize_msg(message, 'warning')
             return
@@ -2730,32 +2730,32 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['EXEC_ORDER'] = sfcallOrder
         self.cfgData['G2_CONFIG']['CFG_SFCALL'].append(newRecord)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Standardize call successfully added!', 'success')
 
-    def do_listStandardizationCalls(self, arg):
+    def do_listStandardizeCalls(self, arg):
         """
-        Returns the list of standardization calls.
+        Returns the list of standardize calls.
 
         Syntax:
-            listStandardizationCalls [filter_expression] [table|json|jsonl]
+            listStandardizeCalls [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
 
         json_lines = []
         for sfcallRecord in sorted(self.getRecordList('CFG_SFCALL'), key=lambda k: (k['FTYPE_ID'], k['EXEC_ORDER'])):
-            sfcallJson = self.formatStandardizationCallJson(sfcallRecord)
+            sfcallJson = self.formatStandardizeCallJson(sfcallRecord)
             if arg and arg.lower() not in str(sfcallJson).lower():
                 continue
             json_lines.append(sfcallJson)
 
         self.print_json_lines(json_lines)
 
-    def do_getStandardizationCall(self, arg):
+    def do_getStandardizeCall(self, arg):
         """
         Returns a single standarization call
 
         Syntax:
-            getStandardizationCall id [table|json|jsonl]
+            getStandardizeCall id [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
@@ -2771,16 +2771,16 @@ class G2CmdShell(cmd.Cmd, object):
 
         sfcallRecord = self.getRecord('CFG_SFCALL', 'SFCALL_ID', parmData['ID'])
         if not sfcallRecord:
-            colorize_msg(f"Standardization call ID {parmData['ID']} does not exist", 'warning')
+            colorize_msg(f"Standardize call ID {parmData['ID']} does not exist", 'warning')
             return
-        self.print_json_record(self.formatStandardizationCallJson(sfcallRecord))
+        self.print_json_record(self.formatStandardizeCallJson(sfcallRecord))
 
-    def do_deleteStandardizationCall(self, arg):
+    def do_deleteStandardizeCall(self, arg):
         """
-        Deletes a standardization call
+        Deletes a standardize call
 
         Syntax:
-            deleteStandardizationCall id
+            deleteStandardizeCall id
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -2795,11 +2795,11 @@ class G2CmdShell(cmd.Cmd, object):
 
         sfcallRecord = self.getRecord('CFG_SFCALL', 'SFCALL_ID', parmData['ID'])
         if not sfcallRecord:
-            colorize_msg(f"Standardization call ID {parmData['ID']} does not exist", 'warning')
+            colorize_msg(f"Standardize call ID {parmData['ID']} does not exist", 'warning')
             return
 
         self.cfgData['G2_CONFIG']['CFG_SFCALL'].remove(sfcallRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Standardize call successfully deleted!', 'success')
         self.configUpdated = True
 
 # ===== expression call commands =====
@@ -2883,7 +2883,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Command error: {err}', 'error')
             return
 
-        efcallID = self.checkDesiredRecordID('CFG_EFCALL', 'EFCALL_ID', parmData.get('ID'))
+        efcallID = self.checkDesiredRecordID('CFG_EFCALL', 'EFCALL_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and efcallID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -2908,7 +2908,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Either a feature or an element must be specified, but not both', 'error')
             return
 
-        efcallOrder = self.checkDesiredRecordID('CFG_EFCALL', ['FTYPE_ID', 'FELEM_ID', 'EXEC_ORDER'], [ftypeID, felemID, parmData.get('EXECORDER')], seed_order=0)
+        efcallOrder = self.checkDesiredRecordID('CFG_EFCALL', ['FTYPE_ID', 'FELEM_ID', 'EXEC_ORDER'], [ftypeID, felemID, parmData.get('EXECORDER')])
         if parmData['EXECORDER'] and efcallOrder != parmData['EXECORDER']:
             colorize_msg('The specified execution order for the feature/element is already taken', 'error')
             return
@@ -2994,7 +2994,7 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_EFCALL'].append(newRecord)
         self.cfgData['G2_CONFIG']['CFG_EFBOM'].extend(efbomRecordList)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Expression call successfully added!', 'success')
 
     def do_listExpressionCalls(self, arg):
         """
@@ -3065,7 +3065,7 @@ class G2CmdShell(cmd.Cmd, object):
         for efbomRecord in self.getRecordList('CFG_EFBOM', 'EFCALL_ID', parmData['ID']):
             self.cfgData['G2_CONFIG']['CFG_EFBOM'].remove(efbomRecord)
         self.cfgData['G2_CONFIG']['CFG_EFCALL'].remove(efcallRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Expression call successfully deleted!', 'success')
         self.configUpdated = True
 
 # ===== comparison call commands =====
@@ -3116,7 +3116,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Command error: {err}', 'error')
             return
 
-        cfcallID = self.checkDesiredRecordID('CFG_CFCALL', 'CFCALL_ID', parmData.get('ID'))
+        cfcallID = self.checkDesiredRecordID('CFG_CFCALL', 'CFCALL_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and cfcallID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -3178,7 +3178,7 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_CFCALL'].append(newRecord)
         self.cfgData['G2_CONFIG']['CFG_CFBOM'].extend(cfbomRecordList)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Comparison call successfully added!', 'success')
 
     def do_listComparisonCalls(self, arg):
         """
@@ -3249,11 +3249,11 @@ class G2CmdShell(cmd.Cmd, object):
         for cfbomRecord in self.getRecordList('CFG_CFBOM', 'CFCALL_ID', parmData['ID']):
             self.cfgData['G2_CONFIG']['CFG_CFBOM'].remove(cfbomRecord)
         self.cfgData['G2_CONFIG']['CFG_CFCALL'].remove(cfcallRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Comparison call successfully deleted!', 'success')
         self.configUpdated = True
 
 
-# ===== distinctness call commands =====
+# ===== distinct call commands =====
 
     def formatDistinctCallJson(self, dfcallRecord):
         dfcallID = dfcallRecord['DFCALL_ID']
@@ -3280,7 +3280,7 @@ class G2CmdShell(cmd.Cmd, object):
 
     def do_addDistinctCall(self, arg):
         """
-        Add a new distinctness call
+        Add a new distinct call
 
         Syntax:
             addDistinctCall {json_configuration}
@@ -3302,7 +3302,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Command error: {err}', 'error')
             return
 
-        dfcallID = self.checkDesiredRecordID('CFG_DFCALL', 'DFCALL_ID', parmData.get('ID'))
+        dfcallID = self.checkDesiredRecordID('CFG_DFCALL', 'DFCALL_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and dfcallID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -3316,10 +3316,10 @@ class G2CmdShell(cmd.Cmd, object):
         parmData['EXECORDER'] = 1
         dfcallRecord = self.getRecord('CFG_DFCALL', 'FTYPE_ID', ftypeID)
         if dfcallRecord:
-            colorize_msg(f"Distinctness call for function {parmData['FEATURE']} already set", 'warning')
+            colorize_msg(f"Distinct call for function {parmData['FEATURE']} already set", 'warning')
             return
 
-        dfuncRecord, message = self.lookupDistinctnessFunction(parmData['FUNCTION'])
+        dfuncRecord, message = self.lookupDistinctFunction(parmData['FUNCTION'])
         if not dfuncRecord:
             colorize_msg(message, 'warning')
             return
@@ -3364,11 +3364,11 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_DFCALL'].append(newRecord)
         self.cfgData['G2_CONFIG']['CFG_DFBOM'].extend(dfbomRecordList)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Distinct call successfully added!', 'success')
 
     def do_listDistinctCalls(self, arg):
         """
-        Returns the list of distinctness calls
+        Returns the list of distinct calls
 
         Syntax:
             listDistinctCalls [filter_expression] [table|json|jsonl]
@@ -3386,7 +3386,7 @@ class G2CmdShell(cmd.Cmd, object):
 
     def do_getDistinctCall(self, arg):
         """
-        Returns a single distinctness call
+        Returns a single distinct call
 
         Syntax:
             getDistinctCall id [table|json|jsonl]
@@ -3405,7 +3405,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         dfcallRecord = self.getRecord('CFG_DFCALL', 'DFCALL_ID', parmData['ID'])
         if not dfcallRecord:
-            colorize_msg(f"Distinctness call ID {parmData['ID']} does not exist", 'warning')
+            colorize_msg(f"Distinct call ID {parmData['ID']} does not exist", 'warning')
             return
         self.print_json_record(self.formatDistinctCallJson(dfcallRecord))
 
@@ -3435,7 +3435,7 @@ class G2CmdShell(cmd.Cmd, object):
         for dfbomRecord in self.getRecordList('CFG_DFBOM', 'DFCALL_ID', parmData['ID']):
             self.cfgData['G2_CONFIG']['CFG_DFBOM'].remove(dfbomRecord)
         self.cfgData['G2_CONFIG']['CFG_DFCALL'].remove(dfcallRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Distinct call successfully deleted!', 'success')
         self.configUpdated = True
 
 # ===== add/delete call elements =====
@@ -3564,7 +3564,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         self.cfgData['G2_CONFIG'][callElementData['bom_table']].append(newRecord)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg(f"{callElementData['call_type']} call element successfully added!", 'success')
 
     def do_deleteCallElement(self, arg):
         """
@@ -3589,7 +3589,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         self.cfgData['G2_CONFIG'][callElementData['bom_table']].remove(callElementData['bomRecord'])
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg(f"{callElementData['call_type']} call element successfully deleted!", 'success')
         self.configUpdated = True
 
     # convenience functions
@@ -3661,42 +3661,42 @@ class G2CmdShell(cmd.Cmd, object):
         self.do_deleteCallElement(json.dumps(parmData))
 
 
-# ===== feature behavior overides =====
+# ===== feature behavior overrides =====
 
-    def formatBehaviorOverideJson(self, behaviorRecord):
+    def formatBehaviorOverrideJson(self, behaviorRecord):
         ftypeCode = self.getRecord("CFG_FTYPE", "FTYPE_ID", behaviorRecord["FTYPE_ID"])["FTYPE_CODE"]
 
         return {"feature": ftypeCode,
                 "usageType": behaviorRecord['UTYPE_CODE'],
                 "behavior": getFeatureBehavior(behaviorRecord)}
 
-    def do_listBehaviorOverides(self, arg):
+    def do_listBehaviorOverrides(self, arg):
         """
-        Returns the list of feature behavior overides
+        Returns the list of feature behavior overrides
 
         Syntax:
-            listBehaviorOverides [filter_expression] [table|json|jsonl]
+            listBehaviorOverrides [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
 
         json_lines = []
         for behaviorRecord in sorted(self.getRecordList('CFG_FBOVR'), key=lambda k: (k['FTYPE_ID'], k['UTYPE_CODE'])):
-            behaviorJson = self.formatBehaviorOverideJson(behaviorRecord)
+            behaviorJson = self.formatBehaviorOverrideJson(behaviorRecord)
             if arg and arg.lower() not in str(behaviorJson).lower():
                 continue
             json_lines.append(behaviorJson)
 
         self.print_json_lines(json_lines)
 
-    def do_addBehaviorOveride(self, arg):
+    def do_addBehaviorOverride(self, arg):
         """
-        Add a new behavior overide
+        Add a new behavior override
 
         Syntax:
-            addBehaviorOveride {json_configuration}
+            addBehaviorOverride {json_configuration}
 
         Examples:
-            see listBehaviorOverides for examples of json_configurations
+            see listBehaviorOverrides for examples of json_configurations
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -3735,15 +3735,15 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['FTYPE_STAB'] = behaviorData['STABILITY']
 
         self.cfgData['G2_CONFIG']['CFG_FBOVR'].append(newRecord)
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Behavior override successfully added!', 'success')
         self.configUpdated = True
 
-    def do_deleteBehaviorOveride(self, arg):
+    def do_deleteBehaviorOverride(self, arg):
         """
-        Deletes a behavior overide
+        Deletes a behavior override
 
         Example:
-            deleteBehaviorOveride {"feature": "PHONE", "usageType": "MOBILE"}
+            deleteBehaviorOverride {"feature": "PHONE", "usageType": "MOBILE"}
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -3768,7 +3768,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         self.cfgData['G2_CONFIG']['CFG_FBOVR'].remove(behaviorRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Behavior override successfully deleted!', 'success')
         self.configUpdated = True
 
 
@@ -3819,7 +3819,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(message, 'warning')
             return
 
-        next_id = self.checkDesiredRecordID('CFG_GPLAN', 'GPLAN_ID', 0, seed_order = 0)
+        next_id = self.checkDesiredRecordID('CFG_GPLAN', 'GPLAN_ID', 0)
 
         newRecord = {}
         newRecord['GPLAN_ID'] = next_id
@@ -3832,7 +3832,7 @@ class G2CmdShell(cmd.Cmd, object):
             newRecord['GPLAN_ID'] = next_id
             self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].append(newRecord)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Generic plan successfully added!', 'success')
 
     def do_deleteGenericPlan(self, arg):
         """
@@ -3864,7 +3864,7 @@ class G2CmdShell(cmd.Cmd, object):
         self.cfgData['G2_CONFIG']['CFG_GPLAN'].remove(planRecord)
         for thresholdRecord in self.getRecordList('CFG_GENERIC_THRESHOLD', 'GPLAN_ID', planRecord['GPLAN_ID']):
             self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].remove(thresholdRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Generic plan successfully deleted!', 'success')
         self.configUpdated = True
 
 # ===== generic threshold commands =====
@@ -3978,7 +3978,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].append(newRecord)
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Generic threshold successfully added!', 'success')
         self.configUpdated = True
 
     def do_setGenericThreshold(self, arg):
@@ -4042,7 +4042,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].remove(oldRecord)
         self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].append(newRecord)
-        colorize_msg('Successfully updated!', 'success')
+        colorize_msg('Generic threshold successfully updated!', 'success')
         self.configUpdated = True
 
     def do_deleteGenericThreshold(self, arg):
@@ -4082,7 +4082,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         self.cfgData['G2_CONFIG']['CFG_GENERIC_THRESHOLD'].remove(oldRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Generic threshold successfully deleted!', 'success')
         self.configUpdated = True
 
 
@@ -4156,17 +4156,17 @@ class G2CmdShell(cmd.Cmd, object):
                 json_lines.append({"attributeClass": attrClass})
             self.print_json_lines(json_lines, 'Attribute Classes')
 
-    # standardization functions
+    # standardize functions
 
-    def do_addStandardizationFunction(self, arg):
+    def do_addStandardizeFunction(self, arg):
         """
-        Adds a new standardization function
+        Adds a new standardize function
 
         Syntax:
-            addStandardizationFunction {json_configuration}
+            addStandardizeFunction {json_configuration}
 
         Examples:
-            see listStandardizationFunctions for examples of json_configurations
+            see listStandardizeFunctions for examples of json_configurations
 
         Caution:
             Adding a new function requires a plugin to be programmed!
@@ -4209,11 +4209,11 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['JAVA_CLASS_NAME'] = parmData['JAVACLASSNAME']
         self.cfgData['G2_CONFIG']['CFG_SFUNC'].append(newRecord)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Standardize function successfully added!', 'success')
 
-    def do_listStandardizationFunctions(self, arg):
+    def do_listStandardizeFunctions(self, arg):
         """
-        Returns the list of standardization functions
+        Returns the list of standardize functions
 
         Syntax:
             listStandardizeFunctions [filter_expression] [table|json|jsonl]
@@ -4286,7 +4286,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         self.cfgData['G2_CONFIG']['CFG_EFUNC'].append(newRecord)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Expression function successfully added!', 'success')
 
     def do_listExpressionFunctions(self, arg):
         """
@@ -4366,7 +4366,7 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['JAVA_CLASS_NAME'] = parmData['JAVACLASSNAME']
         self.cfgData['G2_CONFIG']['CFG_CFUNC'].append(newRecord)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Comparison function successfully added!', 'success')
 
     def do_listComparisonFunctions(self, arg):
         """
@@ -4469,7 +4469,7 @@ class G2CmdShell(cmd.Cmd, object):
         elif parmData.get('EXECORDER'):
             execOrder = parmData.get('EXECORDER')
         else:
-            execOrder = self.checkDesiredRecordID('CFG_CFRTN', ['CFUNC_ID', 'FTYPE_ID', 'EXEC_ORDER'], [cfuncID, 0, 0], seed_order=0)
+            execOrder = self.checkDesiredRecordID('CFG_CFRTN', ['CFUNC_ID', 'FTYPE_ID', 'EXEC_ORDER'], [cfuncID, 0, 0])
 
         newRecord = {}
         newRecord['CFRTN_ID'] = cfrtnID
@@ -4484,7 +4484,7 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['UN_LIKELY_SCORE'] = parmData['UNLIKELYSCORE']
         self.cfgData['G2_CONFIG']['CFG_CFRTN'].append(newRecord)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Comparison threshold successfully added!', 'success')
 
     def do_setComparisonThreshold(self, arg):
         """
@@ -4534,7 +4534,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         self.cfgData['G2_CONFIG']['CFG_CFRTN'].remove(oldRecord)
         self.cfgData['G2_CONFIG']['CFG_CFRTN'].append(newRecord)
-        colorize_msg('Successfully updated!', 'success')
+        colorize_msg('Comparison threshold successfully updated!', 'success')
         self.configUpdated = True
 
     def do_listComparisonThresholds(self, arg):
@@ -4579,17 +4579,17 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         self.cfgData['G2_CONFIG']['CFG_CFRTN'].remove(cfrtnRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Comparison threshold successfully deleted!', 'success')
         self.configUpdated = True
 
-    # distinctness functions
+    # distinct functions
 
-    def do_listDistinctnessFunctions(self, arg):
+    def do_listDistinctFunctions(self, arg):
         """
-        Returns the list of distinctness functions
+        Returns the list of distinct functions
 
         Syntax:
-            listDistinctnessFunctions [filter_expression] [table|json|jsonl]
+            listDistinctFunctions [filter_expression] [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('list', arg)
         json_lines = []
@@ -4605,15 +4605,15 @@ class G2CmdShell(cmd.Cmd, object):
         if json_lines:
             self.print_json_lines(json_lines)
 
-    def do_addDistinctnessFunction(self, arg):
+    def do_addDistinctFunction(self, arg):
         """
-        Adds a new distinctness function
+        Adds a new distinct function
 
         Syntax:
-            addDistinctnessFunction {json_configuration}
+            addDistinctFunction {json_configuration}
 
         Examples:
-            see listDistinctnessFunctions for examples of json_configurations
+            see listDistinctFunctions for examples of json_configurations
 
         Caution:
             Adding a new function requires a plugin to be programmed!
@@ -4658,7 +4658,7 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['JAVA_CLASS_NAME'] = parmData['JAVACLASSNAME']
         self.cfgData['G2_CONFIG']['CFG_DFUNC'].append(newRecord)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Distinct function successfully added!', 'success')
 
     # element functions
 
@@ -4705,7 +4705,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(message, 'error')
             return
 
-        felemID = self.checkDesiredRecordID('CFG_FELEM', 'FELEM_ID', parmData.get('ID'))
+        felemID = self.checkDesiredRecordID('CFG_FELEM', 'FELEM_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and felemID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -4718,7 +4718,7 @@ class G2CmdShell(cmd.Cmd, object):
         newRecord['DATA_TYPE'] = parmData['DATATYPE']
         self.cfgData['G2_CONFIG']['CFG_FELEM'].append(newRecord)
         self.configUpdated = True
-        colorize_msg('Successfully added!', 'success')
+        colorize_msg('Element successfully added!', 'success')
 
     def do_listElements(self, arg):
         """
@@ -4783,8 +4783,76 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         self.cfgData['G2_CONFIG']['CFG_FELEM'].remove(elementRecord)
-        colorize_msg('Successfully deleted!', 'success')
+        colorize_msg('Element successfully deleted!', 'success')
         self.configUpdated = True
+
+    def do_addElementToFeature(self, arg):
+        """
+        Add an element to an existing feature
+
+        Syntax:
+            addElementToFeature {json_configuration}
+
+        Example:
+            addElementToFeature {"feature": "MY_FEATURE", "element": "MY_ELEMENT"}
+
+        Notes:
+            This command appends an additional element to an existing feature. The element will be added if it does not exist.
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.validate_parms(parmData, ['FEATURE', 'ELEMENT'])
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
+            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
+            return
+
+        ftypeRecord, message = self.lookupFeature(parmData['FEATURE'].upper())
+        if not ftypeRecord:
+            colorize_msg(message, 'error')
+            return
+        ftypeID = ftypeRecord['FTYPE_ID']
+
+        if not self.getRecord('CFG_FELEM', 'FELEM_CODE', parmData['ELEMENT']):
+            self.do_addElement(json.dumps(parmData))
+
+        felemRecord, message = self.lookupElement(parmData['ELEMENT'])
+        if not felemRecord: # this should not happen as we added if not exists just above
+            colorize_msg(message, 'error')
+            return
+        felemID = felemRecord['FELEM_ID']
+
+        fbomRecord, message = self.lookupFeatureElement(parmData['FEATURE'], parmData['ELEMENT'])
+        if fbomRecord:
+            print('here', message)
+            colorize_msg(message, 'warning')
+            return
+
+        parmData['DERIVED'], message = self.validateDomain('Derived', parmData.get('DERIVED', 'No'), ['Yes', 'No'])
+        if not parmData['DERIVED']:
+            colorize_msg(message, 'error')
+            return
+
+        parmData['DISPLAY_DELIM'] = parmData.get('DISPLAY_DELIM', None)
+        parmData['DISPLAY_LEVEL'] = parmData.get('DISPLAY_LEVEL', 0)
+
+        execOrder = self.checkDesiredRecordID('CFG_FBOM', ['FTYPE_ID', 'EXEC_ORDER'], [ftypeID, 0])
+
+        newRecord = {}
+        newRecord['FTYPE_ID'] = ftypeID
+        newRecord['FELEM_ID'] = felemID
+        newRecord['EXEC_ORDER'] = execOrder
+        newRecord['DISPLAY_LEVEL'] = parmData['DISPLAY_LEVEL']
+        newRecord['DISPLAY_DELIM'] = parmData['DISPLAY_DELIM']
+        newRecord['DERIVED'] = parmData['DERIVED']
+        self.cfgData['G2_CONFIG']['CFG_FBOM'].append(newRecord)
+        self.configUpdated = True
+        colorize_msg('Element successfully added to feature!', 'success')
+
 
 # ===== other miscellaneous functions =====
 
@@ -4812,7 +4880,7 @@ class G2CmdShell(cmd.Cmd, object):
             if self.isInteractive is False:
                 raise Exception('Incorrect compatibility version.')
         else:
-            colorize_msg("This version is compatible", 'success')
+            colorize_msg("Compatibility version successfully verified", 'success')
 
     def do_updateCompatibilityVersion(self, arg):
         """
@@ -4837,7 +4905,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         self.cfgData['G2_CONFIG']['CONFIG_BASE_VERSION']['COMPATIBILITY_VERSION']['CONFIG_VERSION'] = parmData['TOVERSION']
         self.configUpdated = True
-        colorize_msg('Successfully updated!', 'success')
+        colorize_msg('Compatibility version successfully updated!', 'success')
 
     def do_getCompatibilityVersion(self, arg):
         """
@@ -4917,7 +4985,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f"Field already existed on {existed_cnt} records", 'warning')
         if updated_cnt > 0:
             self.configUpdated = True
-            colorize_msg(f"Field successfully added to {updated_cnt} records!", 'success')
+            colorize_msg(f"Configuration section field successfully added to {updated_cnt} records!", 'success')
 
     # ===== system parameters  =====
 
@@ -4970,6 +5038,34 @@ class G2CmdShell(cmd.Cmd, object):
         # This is a no-op. It marks the configuration as modified, without doing anything to it.
         self.configUpdated = True
         print()
+
+# ===== Deprecated/replaced commands =====
+
+    # addStandardizeFunc              replaced with addStandardizeFunction
+    def do_addStandardizeFunc(self, arg):
+        self.do_addStandardizeFunction(arg)
+
+    def do_addExpressionFunc(self, arg):
+        self.do_addExpressionFunction(arg)
+
+    def do_addComparisonFunc(self, arg):
+        self.do_addComparisonFunction(arg)
+
+    # addExpressionFunc               replaced with addExpressionFunction
+    # addComparisonFunc               replaced with addComparisonFunction
+
+    # addFeatureDistinctCallElement   replaced with addCallElement
+    # addFeatureComparisonElement     replaced with addCallElement
+    # deleteFeatureComparisonElement  replaced with deleteCallElement
+
+    # deleteFeatureDistinctCall       replaced with deleteDistinctCall
+
+    # addFeatureComparison            replaced with addComparisonCall
+    # deleteFeatureComparison         replaced with deleteComparisonCall
+
+    # setFeatureComparison            replaced with deleteComparisonCall and addComparisonCall
+
+    # setDistinctOff                  replaced with deleteDistinctCall for each feature
 
 # ===== Class Utils =====
 
@@ -5056,25 +5152,6 @@ class G2CmdShell(cmd.Cmd, object):
         less.wait()
         print()
 
-
-# ===== Deprecated/replaced commands =====
-
-    # addStandardizeFunc              replaced with addStandardizeFunction
-    # addExpressionFunc               replaced with addExpressionFunction
-    # addComparisonFunc               replaced with addComparisonFunction
-
-    # addFeatureDistinctCallElement   replaced with addCallElement
-    # addFeatureComparisonElement     replaced with addCallElement
-    # deleteFeatureComparisonElement  replaced with deleteCallElement
-
-    # deleteFeatureDistinctCall       replaced with deleteDistinctCall
-
-    # addFeatureComparison            replaced with addComparisonCall
-    # deleteFeatureComparison         replaced with deleteComparisonCall
-
-    # setFeatureComparison            replaced with deleteComparisonCall and addComparisonCall
-
-    # setDistinctOff                  replaced with deleteDistinctCall for each feature
 
 # ===== Utility functions =====
 
