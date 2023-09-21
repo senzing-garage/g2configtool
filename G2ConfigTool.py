@@ -206,7 +206,12 @@ class G2CmdShell(cmd.Cmd, object):
         self.doc_header = 'Configuration Command List'
         self.misc_header = 'Help Topics (help <topic>)'
         self.undoc_header = 'Misc Commands'
-        self.__hidden_methods = ('do_EOF', 'do_help', 'do_addStandardizeFunc', 'do_addExpressionFunc', 'do_addComparisonFunc')
+        self.__hidden_methods = ('do_EOF', 'do_help',
+                                 'do_addStandardizeFunc',
+                                 'do_addExpressionFunc',
+                                 'do_addComparisonFunc',
+                                 'do_addComparisonFuncReturnCode')
+
         self.g2_configmgr = G2ConfigMgr()
         self.g2_config = G2Config()
 
@@ -1054,7 +1059,7 @@ class G2CmdShell(cmd.Cmd, object):
             if felemRecord:
                 fbomRecord = self.getRecord('CFG_FBOM', ['FTYPE_ID', 'FELEM_ID'], [ftypeRecord['FTYPE_ID'], felemRecord['FELEM_ID']])
                 if fbomRecord:
-                    return fbomRecord, f'Element "{element}" is already a feature of "{feature}"'
+                    return fbomRecord, f'"{element}" is already an element of feature "{feature}"'
             return None, f'{element} is not an element of {feature} (use command "getFeature {feature}" to see its elements)'
 
     def lookupFeatureClass(self, featureClass):
@@ -1144,7 +1149,10 @@ class G2CmdShell(cmd.Cmd, object):
                 max_width = int(self.json_attr_types.get(attr_name).split('|')[1]) if '|' in self.json_attr_types.get(attr_name) else 0
                 if data_type == 'integer':
                     if not isinstance(attr_value, int):
-                        raise ValueError(f'{attr_name} must be an integer')
+                        if attr_value.isdigit():
+                            parm_dict[attr_name] = int(parm_dict[attr_name])
+                        else:
+                            raise ValueError(f'{attr_name} must be an integer')
                 else:
                     if not isinstance(attr_value, str):
                         raise ValueError(f'{attr_name} must be a string')
@@ -1338,7 +1346,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         elementList = []
         fbomRecordList = self.getRecordList('CFG_FBOM', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
-        for fbomRecord in fbomRecordList:
+        for fbomRecord in sorted(fbomRecordList, key=lambda k: k['EXEC_ORDER']):
             felemRecord = self.getRecord('CFG_FELEM', 'FELEM_ID', fbomRecord['FELEM_ID'])
             if not felemRecord:
                 elementList.append('ERROR: FELEM_ID %s' % fbomRecord['FELEM_ID'])
@@ -4427,6 +4435,7 @@ class G2CmdShell(cmd.Cmd, object):
             parmData = dictKeysUpper(json.loads(arg))
             self.validate_parms(parmData, ['FUNCTION', 'SCORENAME'])
             parmData['ID'] = parmData.get('ID', 0)
+            parmData['FEATURE'] = parmData.get('FEATURE', 'ALL')
             parmData['FUNCTION'] = parmData['FUNCTION'].upper()
             parmData['SCORENAME'] = parmData['SCORENAME'].upper()
             parmData['SAMESCORE'] = int(parmData.get('SAMESCORE', 100))
@@ -4828,7 +4837,6 @@ class G2CmdShell(cmd.Cmd, object):
 
         fbomRecord, message = self.lookupFeatureElement(parmData['FEATURE'], parmData['ELEMENT'])
         if fbomRecord:
-            print('here', message)
             colorize_msg(message, 'warning')
             return
 
@@ -4839,19 +4847,49 @@ class G2CmdShell(cmd.Cmd, object):
 
         parmData['DISPLAY_DELIM'] = parmData.get('DISPLAY_DELIM', None)
         parmData['DISPLAY_LEVEL'] = parmData.get('DISPLAY_LEVEL', 0)
-
-        execOrder = self.checkDesiredRecordID('CFG_FBOM', ['FTYPE_ID', 'EXEC_ORDER'], [ftypeID, 0])
+        parmData['EXECORDER'] = self.checkDesiredRecordID('CFG_FBOM', ['FTYPE_ID', 'EXEC_ORDER'], [ftypeID, parmData.get('EXECORDER', 0)])
 
         newRecord = {}
         newRecord['FTYPE_ID'] = ftypeID
         newRecord['FELEM_ID'] = felemID
-        newRecord['EXEC_ORDER'] = execOrder
+        newRecord['EXEC_ORDER'] = parmData['EXECORDER']
         newRecord['DISPLAY_LEVEL'] = parmData['DISPLAY_LEVEL']
         newRecord['DISPLAY_DELIM'] = parmData['DISPLAY_DELIM']
         newRecord['DERIVED'] = parmData['DERIVED']
         self.cfgData['G2_CONFIG']['CFG_FBOM'].append(newRecord)
         self.configUpdated = True
         colorize_msg('Element successfully added to feature!', 'success')
+
+    def do_deleteElementFromFeature(self, arg):
+        """
+        Delete an element from a feature
+
+        Syntax:
+            deleteElementFromFeature {json_configuration}
+
+        Example:
+            deleteElementFromFeature {"feature": "MY_FEATURE", "element": "MY_ELEMENT"}
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg))
+            self.validate_parms(parmData, ['FEATURE', 'ELEMENT'])
+            parmData['FEATURE'] = parmData['FEATURE'].upper()
+            parmData['ELEMENT'] = parmData['ELEMENT'].upper()
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
+            return
+
+        fbomRecord, message = self.lookupFeatureElement(parmData['FEATURE'], parmData['ELEMENT'])
+        if not fbomRecord:
+            colorize_msg(message, 'warning')
+            return
+
+        self.cfgData['G2_CONFIG']['CFG_FBOM'].remove(fbomRecord)
+        colorize_msg('Element successfully deleted from feature!', 'success')
+        self.configUpdated = True
 
 
 # ===== other miscellaneous functions =====
@@ -4935,16 +4973,53 @@ class G2CmdShell(cmd.Cmd, object):
         Caution:
             This command should only be used by Senzing engineers
         """
-        arg = self.check_arg_for_output_format('list', arg) # checking for list here even though a get as it
+        arg = self.check_arg_for_output_format('list', arg) # checking for list here even though a get
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"SECTION": arg}
+            self.validate_parms(parmData, ['SECTION'])
+            parmData['SECTION'] = parmData['SECTION'].upper()
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
+            return
 
-        arg = arg.upper()
-        if self.cfgData["G2_CONFIG"].get(arg):
-            self.print_json_lines(self.cfgData["G2_CONFIG"][arg])
+        if self.cfgData['G2_CONFIG'].get(parmData['SECTION']):
+            self.print_json_lines(self.cfgData['G2_CONFIG'][arg])
+        elif parmData['SECTION'] in self.cfgData['G2_CONFIG']:
+            colorize_msg(f'Configuration section is empty', 'warning')
         else:
-            colorize_msg(f'Config table {arg} not found', 'error')
+            colorize_msg(f'Configuration section not found', 'error')
+
+    def do_addConfigSection(self, arg):
+        """
+        Adds a new configuration section
+
+        Syntax:
+            addConfigSection {json_configuration}
+
+        Caution:
+            This command should only be used by Senzing engineers
+        """
+        if not arg:
+            self.do_help(sys._getframe(0).f_code.co_name)
+            return
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"SECTION": arg}
+            self.validate_parms(parmData, ['SECTION'])
+            parmData['SECTION'] = parmData['SECTION'].upper()
+        except Exception as err:
+            colorize_msg(f'Command error: {err}', 'error')
+            return
+
+        if parmData['SECTION'] in self.cfgData['G2_CONFIG']:
+            colorize_msg('Configuration already exists!', 'error')
+            return
+
+        self.cfgData['G2_CONFIG'][parmData['SECTION']] = []
+        self.configUpdated = True
+        colorize_msg('Configuration section successfully added!', 'success')
 
     def do_addConfigSectionField(self, arg):
         """
@@ -5041,7 +5116,6 @@ class G2CmdShell(cmd.Cmd, object):
 
 # ===== Deprecated/replaced commands =====
 
-    # addStandardizeFunc              replaced with addStandardizeFunction
     def do_addStandardizeFunc(self, arg):
         self.do_addStandardizeFunction(arg)
 
@@ -5051,8 +5125,9 @@ class G2CmdShell(cmd.Cmd, object):
     def do_addComparisonFunc(self, arg):
         self.do_addComparisonFunction(arg)
 
-    # addExpressionFunc               replaced with addExpressionFunction
-    # addComparisonFunc               replaced with addComparisonFunction
+    def do_addComparisonFuncReturnCode(self, arg):
+        self.do_addComparisonThreshold(arg)
+
 
     # addFeatureDistinctCallElement   replaced with addCallElement
     # addFeatureComparisonElement     replaced with addCallElement
