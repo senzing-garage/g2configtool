@@ -2649,6 +2649,30 @@ class G2CmdShell(cmd.Cmd, object):
         self.configUpdated = True
 
 
+# ===== call command support functions =====
+
+    def getCallRecord(self, call_type, arg):
+
+        try:
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID" if arg.isdigit() else "FEATURE": int(arg) if arg.isdigit() else arg}
+        except Exception as err:
+            return None, f'Command error: {err}'
+
+        call_table, bom_table, call_id_field, func_table, func_code_field, func_id_field = self.setCallTypeTables(call_type)
+
+        possible_message = 'A feature name or call ID is required'
+        if parmData.get('FEATURE') and not parmData.get("ID"):
+            call_id, possible_message = self.get_call_id(parmData['FEATURE'].upper(), call_type)
+            if call_id:
+                parmData['ID'] = call_id
+        if not parmData.get('ID'):
+            return None, possible_message
+
+        callRecord = self.getRecord(call_table, call_id_field, parmData['ID'])
+        if not callRecord:
+            return None, f"{call_type} call ID {parmData['ID']} does not exist"
+        return callRecord, 'success'
+
 # ===== standardize call commands =====
 
     def formatStandardizeCallJson(self, sfcallRecord):
@@ -2776,51 +2800,31 @@ class G2CmdShell(cmd.Cmd, object):
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID" if arg.isdigit() else "FEATURE": int(arg) if arg.isdigit() else arg}
-        except Exception as err:
-            colorize_msg(f'Command error: {err}', 'error')
+
+        callRecord, message = self.getCallRecord('standardize', arg)
+        if not callRecord:
+            colorize_msg(message, 'error')
             return
 
-        possible_message = 'A feature name or call ID is required'
-        if parmData.get('FEATURE') and not parmData.get("ID"):
-            call_id, possible_message= self.get_call_id(parmData['FEATURE'].upper(), 'standardize')
-            if call_id:
-                parmData['ID'] = call_id
-        if not parmData.get('ID'):
-            colorize_msg(possible_message, 'error')
-            return
-
-        sfcallRecord = self.getRecord('CFG_SFCALL', 'SFCALL_ID', parmData['ID'])
-        if not sfcallRecord:
-            colorize_msg(f"Standardize call ID {parmData['ID']} does not exist", 'warning')
-            return
-        self.print_json_record(self.formatStandardizeCallJson(sfcallRecord))
+        self.print_json_record(self.formatStandardizeCallJson(callRecord))
 
     def do_deleteStandardizeCall(self, arg):
         """
         Deletes a standardize call
 
         Syntax:
-            deleteStandardizeCall id
+            deleteStandardizeCall id or feature
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
-            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
-            self.validate_parms(parmData, ['ID'])
-        except Exception as err:
-            colorize_msg(f'Command error: {err}', 'error')
+
+        callRecord, message = self.getCallRecord('standardize', arg)
+        if not callRecord:
+            colorize_msg(message, 'error')
             return
 
-        sfcallRecord = self.getRecord('CFG_SFCALL', 'SFCALL_ID', parmData['ID'])
-        if not sfcallRecord:
-            colorize_msg(f"Standardize call ID {parmData['ID']} does not exist", 'warning')
-            return
-
-        self.cfgData['G2_CONFIG']['CFG_SFCALL'].remove(sfcallRecord)
+        self.cfgData['G2_CONFIG']['CFG_SFCALL'].remove(callRecord)
         colorize_msg('Standardize call successfully deleted!', 'success')
         self.configUpdated = True
 
@@ -3049,26 +3053,13 @@ class G2CmdShell(cmd.Cmd, object):
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID" if arg.isdigit() else "FEATURE": int(arg) if arg.isdigit() else arg}
-        except Exception as err:
-            colorize_msg(f'Command error: {err}', 'error')
+
+        callRecord, message = self.getCallRecord('expression', arg)
+        if not callRecord:
+            colorize_msg(message, 'error')
             return
 
-        possible_message = 'A feature name or call ID is required'
-        if parmData.get('FEATURE') and not parmData.get("ID"):
-            call_id, possible_message= self.get_call_id(parmData['FEATURE'].upper(), 'expression')
-            if call_id:
-                parmData['ID'] = call_id
-        if not parmData.get('ID'):
-            colorize_msg(possible_message, 'error')
-            return
-
-        efcallRecord = self.getRecord('CFG_EFCALL', 'EFCALL_ID', parmData['ID'])
-        if not efcallRecord:
-            colorize_msg(f"Expression call ID {parmData['ID']} does not exist", 'warning')
-            return
-        self.print_json_record(self.formatExpressionCallJson(efcallRecord))
+        self.print_json_record(self.formatExpressionCallJson(callRecord))
 
     def do_deleteExpressionCall(self, arg):
         """
@@ -3080,22 +3071,15 @@ class G2CmdShell(cmd.Cmd, object):
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
-            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
-            self.validate_parms(parmData, ['ID'])
-        except Exception as err:
-            colorize_msg(f'Command error: {err}', 'error')
+
+        callRecord, message = self.getCallRecord('expression', arg)
+        if not callRecord:
+            colorize_msg(message, 'error')
             return
 
-        efcallRecord = self.getRecord('CFG_EFCALL', 'EFCALL_ID', parmData['ID'])
-        if not efcallRecord:
-            colorize_msg(f"Expression call ID {parmData['ID']} does not exist", 'warning')
-            return
-
-        for efbomRecord in self.getRecordList('CFG_EFBOM', 'EFCALL_ID', parmData['ID']):
+        for efbomRecord in self.getRecordList('CFG_EFBOM', 'EFCALL_ID', callRecord['EFCALL_ID']):
             self.cfgData['G2_CONFIG']['CFG_EFBOM'].remove(efbomRecord)
-        self.cfgData['G2_CONFIG']['CFG_EFCALL'].remove(efcallRecord)
+        self.cfgData['G2_CONFIG']['CFG_EFCALL'].remove(callRecord)
         colorize_msg('Expression call successfully deleted!', 'success')
         self.configUpdated = True
 
@@ -3242,26 +3226,13 @@ class G2CmdShell(cmd.Cmd, object):
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID" if arg.isdigit() else "FEATURE": int(arg) if arg.isdigit() else arg}
-        except Exception as err:
-            colorize_msg(f'Command error: {err}', 'error')
+
+        callRecord, message = self.getCallRecord('comparison', arg)
+        if not callRecord:
+            colorize_msg(message, 'error')
             return
 
-        possible_message = 'A feature name or call ID is required'
-        if parmData.get('FEATURE') and not parmData.get("ID"):
-            call_id, possible_message= self.get_call_id(parmData['FEATURE'].upper(), 'comparison')
-            if call_id:
-                parmData['ID'] = call_id
-        if not parmData.get('ID'):
-            colorize_msg(possible_message, 'error')
-            return
-
-        cfcallRecord = self.getRecord('CFG_CFCALL', 'CFCALL_ID', parmData['ID'])
-        if not cfcallRecord:
-            colorize_msg(f"Comparison call ID {parmData['ID']} does not exist", 'warning')
-            return
-        self.print_json_record(self.formatComparisonCallJson(cfcallRecord))
+         self.print_json_record(self.formatComparisonCallJson(callRecord))
 
     def do_deleteComparisonCall(self, arg):
         """
@@ -3273,22 +3244,15 @@ class G2CmdShell(cmd.Cmd, object):
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
-            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
-            self.validate_parms(parmData, ['ID'])
-        except Exception as err:
-            colorize_msg(f'Command error: {err}', 'error')
+
+        callRecord, message = self.getCallRecord('comparison', arg)
+        if not callRecord:
+            colorize_msg(message, 'error')
             return
 
-        cfcallRecord = self.getRecord('CFG_CFCALL', 'CFCALL_ID', parmData['ID'])
-        if not cfcallRecord:
-            colorize_msg(f"Comparison call ID {parmData['ID']} does not exist", 'warning')
-            return
-
-        for cfbomRecord in self.getRecordList('CFG_CFBOM', 'CFCALL_ID', parmData['ID']):
+        for cfbomRecord in self.getRecordList('CFG_CFBOM', 'CFCALL_ID', callRecord['CFCALL_ID']):
             self.cfgData['G2_CONFIG']['CFG_CFBOM'].remove(cfbomRecord)
-        self.cfgData['G2_CONFIG']['CFG_CFCALL'].remove(cfcallRecord)
+        self.cfgData['G2_CONFIG']['CFG_CFCALL'].remove(callRecord)
         colorize_msg('Comparison call successfully deleted!', 'success')
         self.configUpdated = True
 
@@ -3435,26 +3399,13 @@ class G2CmdShell(cmd.Cmd, object):
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID" if arg.isdigit() else "FEATURE": int(arg) if arg.isdigit() else arg}
-        except Exception as err:
-            colorize_msg(f'Command error: {err}', 'error')
+
+        callRecord, message = self.getCallRecord('distinct', arg)
+        if not callRecord:
+            colorize_msg(message, 'error')
             return
 
-        possible_message = 'A feature name or call ID is required'
-        if parmData.get('FEATURE') and not parmData.get("ID"):
-            call_id, possible_message= self.get_call_id(parmData['FEATURE'].upper(), 'distinct')
-            if call_id:
-                parmData['ID'] = call_id
-        if not parmData.get('ID'):
-            colorize_msg(possible_message, 'error')
-            return
-
-        dfcallRecord = self.getRecord('CFG_DFCALL', 'DFCALL_ID', parmData['ID'])
-        if not dfcallRecord:
-            colorize_msg(f"Distinct call ID {parmData['ID']} does not exist", 'warning')
-            return
-        self.print_json_record(self.formatDistinctCallJson(dfcallRecord))
+        self.print_json_record(self.formatDistinctCallJson(callRecord))
 
     def do_deleteDistinctCall(self, arg):
         """
@@ -3466,22 +3417,15 @@ class G2CmdShell(cmd.Cmd, object):
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
-            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
-            self.validate_parms(parmData, ['ID'])
-        except Exception as err:
-            colorize_msg(f'Command error: {err}', 'error')
+
+        callRecord, message = self.getCallRecord('distinct', arg)
+        if not callRecord:
+            colorize_msg(message, 'error')
             return
 
-        dfcallRecord = self.getRecord('CFG_DFCALL', 'DFCALL_ID', parmData['ID'])
-        if not dfcallRecord:
-            colorize_msg(f"Distintness call ID {parmData['ID']} does not exist", 'warning')
-            return
-
-        for dfbomRecord in self.getRecordList('CFG_DFBOM', 'DFCALL_ID', parmData['ID']):
+        for dfbomRecord in self.getRecordList('CFG_DFBOM', 'DFCALL_ID', callRecord['DFCALL_ID']):
             self.cfgData['G2_CONFIG']['CFG_DFBOM'].remove(dfbomRecord)
-        self.cfgData['G2_CONFIG']['CFG_DFCALL'].remove(dfcallRecord)
+        self.cfgData['G2_CONFIG']['CFG_DFCALL'].remove(callRecord)
         colorize_msg('Distinct call successfully deleted!', 'success')
         self.configUpdated = True
 
@@ -5048,7 +4992,7 @@ class G2CmdShell(cmd.Cmd, object):
         Returns the json configuration for a specific configuration table
 
         Syntax:
-            getConfigSection [section name]
+            getConfigSection [section name] [filter_expression] [table|json|jsonl]
 
         Examples:
             getConfigSection CFG_CFUNC
@@ -5060,17 +5004,24 @@ class G2CmdShell(cmd.Cmd, object):
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
-        try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"SECTION": arg}
-            self.validate_parms(parmData, ['SECTION'])
-            parmData['SECTION'] = parmData['SECTION'].upper()
-        except Exception as err:
-            colorize_msg(f'Command error: {err}', 'error')
-            return
 
-        if self.cfgData['G2_CONFIG'].get(parmData['SECTION']):
-            self.print_json_lines(self.cfgData['G2_CONFIG'][arg])
-        elif parmData['SECTION'] in self.cfgData['G2_CONFIG']:
+        section_name = arg.split()[0]
+        filter_str = None
+        if len(arg.split()) > 1:
+            filter_str = arg.replace(section_name,'').strip()
+            print(f"\nfilter: {filter_str}\n")
+
+        if self.cfgData['G2_CONFIG'].get(section_name):
+            if not filter_str:
+                self.print_json_lines(self.cfgData['G2_CONFIG'][section_name])
+            else:
+                output_rows = []
+                for record in self.cfgData['G2_CONFIG'][section_name]:
+                    if filter_str.lower() in json.dumps(record).lower():
+                        output_rows.append(record)
+                self.print_json_lines(output_rows)
+
+        elif section_name in self.cfgData['G2_CONFIG']:
             colorize_msg(f'Configuration section is empty', 'warning')
         else:
             colorize_msg(f'Configuration section not found', 'error')
@@ -5235,6 +5186,11 @@ class G2CmdShell(cmd.Cmd, object):
             self.do_deleteCallElement(arg)
         self.print_replacement(sys._getframe(0).f_code.co_name, 'do_deleteCallElement')
 
+    def do_addFeatureDistinctCallElement(self, arg):
+        if arg:
+            arg = '{"callType": "distinct", ' + arg[1:]
+            self.do_addCallElement(arg)
+        self.print_replacement(sys._getframe(0).f_code.co_name, 'do_addCallElement')
 
 
 
