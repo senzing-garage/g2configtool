@@ -210,7 +210,9 @@ class G2CmdShell(cmd.Cmd, object):
                                  'do_addStandardizeFunc',
                                  'do_addExpressionFunc',
                                  'do_addComparisonFunc',
-                                 'do_addComparisonFuncReturnCode')
+                                 'do_addComparisonFuncReturnCode',
+                                 'do_addFeatureComparison',
+                                 'do_addFeatureComparisonElement')
 
         self.g2_configmgr = G2ConfigMgr()
         self.g2_config = G2Config()
@@ -1001,7 +1003,7 @@ class G2CmdShell(cmd.Cmd, object):
                 recordList.append(record)
         return recordList
 
-    def checkDesiredRecordID(self, table, field, value, **kwargs):
+    def getDesiredValueOrNext(self, table, field, value, **kwargs):
 
         # turn even single values into list to simplify code
         # be sure to make last item in list the ID or order to be tested/incremented!
@@ -1238,7 +1240,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(message, 'warning')
             return
 
-        next_id = self.checkDesiredRecordID('CFG_DSRC', 'DSRC_ID', parmData.get('ID'), seed_order=1000)
+        next_id = self.getDesiredValueOrNext('CFG_DSRC', 'DSRC_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and next_id != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -1323,15 +1325,19 @@ class G2CmdShell(cmd.Cmd, object):
         sfcallRecordList = self.getRecordList('CFG_SFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
         efcallRecordList = self.getRecordList('CFG_EFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
         cfcallRecordList = self.getRecordList('CFG_CFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
+        dfcallRecordList = self.getRecordList('CFG_DFCALL', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
+
         # while rare, there can be multiple comparison, the first one can be added with the feature,
         #    the second must be added with addStandardizeCall, addExpressionCall, addComparisonCall
         sfcallRecord = sorted(sfcallRecordList, key=lambda k: k['EXEC_ORDER'])[0] if sfcallRecordList else {}
         efcallRecord = sorted(efcallRecordList, key=lambda k: k['EXEC_ORDER'])[0] if efcallRecordList else {}
         cfcallRecord = sorted(cfcallRecordList, key=lambda k: k['EXEC_ORDER'])[0] if cfcallRecordList else {}
+        dfcallRecord = sorted(dfcallRecordList, key=lambda k: k['EXEC_ORDER'])[0] if dfcallRecordList else {}
 
         sfuncRecord = self.getRecord('CFG_SFUNC', 'SFUNC_ID', sfcallRecord['SFUNC_ID']) if sfcallRecord else {}
         efuncRecord = self.getRecord('CFG_EFUNC', 'EFUNC_ID', efcallRecord['EFUNC_ID']) if efcallRecord else {}
         cfuncRecord = self.getRecord('CFG_CFUNC', 'CFUNC_ID', cfcallRecord['CFUNC_ID']) if cfcallRecord else {}
+        dfuncRecord = self.getRecord('CFG_DFUNC', 'DFUNC_ID', dfcallRecord['DFUNC_ID']) if dfcallRecord else {}
 
         ftypeData = {"id": ftypeRecord['FTYPE_ID'],
                      "feature": ftypeRecord['FTYPE_CODE'],
@@ -1342,8 +1348,8 @@ class G2CmdShell(cmd.Cmd, object):
                      "standardize": sfuncRecord['SFUNC_CODE'] if sfuncRecord else '',
                      "expression": efuncRecord['EFUNC_CODE'] if efuncRecord else '',
                      "comparison": cfuncRecord['CFUNC_CODE'] if cfuncRecord else '',
+                     # "distinct": dfuncRecord['DFUNC_CODE'] if dfuncRecord else '', (HIDDEN TO REDUCE CONFUSION, engineers use listDistinctCalls)
                      "matchKey": ftypeRecord['SHOW_IN_MATCH_KEY']}
-
         elementList = []
         fbomRecordList = self.getRecordList('CFG_FBOM', 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
         for fbomRecord in sorted(fbomRecordList, key=lambda k: k['EXEC_ORDER']):
@@ -1403,7 +1409,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(message, 'warning')
             return
 
-        next_id = self.checkDesiredRecordID('CFG_FTYPE', 'FTYPE_ID', parmData.get('ID'), seed_order=1000)
+        next_id = self.getDesiredValueOrNext('CFG_FTYPE', 'FTYPE_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and next_id != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -1516,7 +1522,7 @@ class G2CmdShell(cmd.Cmd, object):
         # add the standardize call
         sfcallID = 0
         if sfuncID > 0:
-            sfcallID = self.checkDesiredRecordID('CFG_SFCALL', 'SFCALL_ID', 0, seed_order=1000)
+            sfcallID = self.getDesiredValueOrNext('CFG_SFCALL', 'SFCALL_ID', 0, seed_order=1000)
             newRecord = {}
             newRecord['SFCALL_ID'] = sfcallID
             newRecord['SFUNC_ID'] = sfuncID
@@ -1525,11 +1531,11 @@ class G2CmdShell(cmd.Cmd, object):
             newRecord['FELEM_ID'] = -1
             self.cfgData['G2_CONFIG']['CFG_SFCALL'].append(newRecord)
 
-        # add the distinct value call (not supported through here yet)
+        # add the distinct value call (NOT SUPPORTED THROUGH HERE YET)
         dfcallID = 0
         dfuncID = 0
         if dfuncID > 0:
-            dfcallID = self.checkDesiredRecordID('CFG_DFCALL', 'DFCALL_ID', 0, seed_order=1000)
+            dfcallID = self.getDesiredValueOrNext('CFG_DFCALL', 'DFCALL_ID', 0, seed_order=1000)
             newRecord = {}
             newRecord['DFCALL_ID'] = dfcallID
             newRecord['DFUNC_ID'] = dfuncID
@@ -1540,7 +1546,7 @@ class G2CmdShell(cmd.Cmd, object):
         # add the expression call
         efcallID = 0
         if efuncID > 0:
-            efcallID = self.checkDesiredRecordID('CFG_EFCALL', 'EFCALL_ID', 0, seed_order=1000)
+            efcallID = self.getDesiredValueOrNext('CFG_EFCALL', 'EFCALL_ID', 0, seed_order=1000)
             newRecord = {}
             newRecord['EFCALL_ID'] = efcallID
             newRecord['EFUNC_ID'] = efuncID
@@ -1554,7 +1560,7 @@ class G2CmdShell(cmd.Cmd, object):
         # add the comparison call
         cfcallID = 0
         if cfuncID > 0:
-            cfcallID = self.checkDesiredRecordID('CFG_CFCALL', 'CFCALL_ID', 0, seed_order=1000)
+            cfcallID = self.getDesiredValueOrNext('CFG_CFCALL', 'CFCALL_ID', 0, seed_order=1000)
             newRecord = {}
             newRecord['CFCALL_ID'] = cfcallID
             newRecord['CFUNC_ID'] = cfuncID
@@ -1581,7 +1587,7 @@ class G2CmdShell(cmd.Cmd, object):
             if felemRecord:
                 felemID = felemRecord['FELEM_ID']
             else:
-                felemID = self.checkDesiredRecordID('CFG_FELEM', 'FELEM_ID', 0, seed_order=1000)
+                felemID = self.getDesiredValueOrNext('CFG_FELEM', 'FELEM_ID', 0, seed_order=1000)
                 newRecord = {}
                 newRecord['FELEM_ID'] = felemID
                 newRecord['FELEM_CODE'] = elementRecord['ELEMENT']
@@ -1904,7 +1910,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(message, 'warning')
             return
 
-        next_id = self.checkDesiredRecordID('CFG_ATTR', 'ATTR_ID', parmData.get('ID'))
+        next_id = self.getDesiredValueOrNext('CFG_ATTR', 'ATTR_ID', parmData.get('ID'))
         if parmData.get('ID') and next_id != parmData['ID']:
             colorize_msg('The specified ID is already taken  (remove it to assign the next available)', 'error')
             return
@@ -2267,7 +2273,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Fragment already exists', 'warning')
             return
 
-        erfragID = self.checkDesiredRecordID('CFG_ERFRAG', 'ERFRAG_ID', parmData.get('ID'))
+        erfragID = self.getDesiredValueOrNext('CFG_ERFRAG', 'ERFRAG_ID', parmData.get('ID'))
         if parmData.get('ID') and erfragID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -2495,7 +2501,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Rule already exists', 'warning')
             return
 
-        erruleID = self.checkDesiredRecordID('CFG_ERRULE', 'ERRULE_ID', parmData.get('ID'))
+        erruleID = self.getDesiredValueOrNext('CFG_ERRULE', 'ERRULE_ID', parmData.get('ID'))
         if parmData.get('ID') and erruleID != parmData['ID']:
             colorize_msg('The specified ID is already taken', 'error')
             return
@@ -2683,9 +2689,10 @@ class G2CmdShell(cmd.Cmd, object):
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
-
         try:
             parmData = dictKeysUpper(json.loads(arg))
+            if not parmData.get('FUNCTION') and parmData.get('STANDARDIZE'):
+                parmData['FUNCTION'] = parmData['STANDARDIZE']
             self.validate_parms(parmData, ['FUNCTION'])
             parmData['ID'] = parmData.get('ID', 0)
             parmData['EXECORDER'] = parmData.get('EXECORDER', 0)
@@ -2694,7 +2701,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Command error: {err}', 'error')
             return
 
-        sfcallID = self.checkDesiredRecordID('CFG_SFCALL', 'SFCALL_ID', parmData.get('ID'), seed_order=1000)
+        sfcallID = self.getDesiredValueOrNext('CFG_SFCALL', 'SFCALL_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and sfcallID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -2719,7 +2726,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Either a feature or an element must be specified, but not both', 'error')
             return
 
-        sfcallOrder = self.checkDesiredRecordID('CFG_SFCALL', ['FTYPE_ID', 'FELEM_ID', 'EXEC_ORDER'], [ftypeID, felemID, parmData.get('EXECORDER')])
+        sfcallOrder = self.getDesiredValueOrNext('CFG_SFCALL', ['FTYPE_ID', 'FELEM_ID', 'EXEC_ORDER'], [ftypeID, felemID, parmData.get('EXECORDER')])
         if parmData['EXECORDER'] and sfcallOrder != parmData['EXECORDER']:
             colorize_msg('The specified execution order for the feature/element is already taken', 'error')
             return
@@ -2763,18 +2770,25 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single standarization call
 
         Syntax:
-            getStandardizeCall id [table|json|jsonl]
+            getStandardizeCall id or feature [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
-            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
-            self.validate_parms(parmData, ['ID'])
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID" if arg.isdigit() else "FEATURE": int(arg) if arg.isdigit() else arg}
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
+            return
+
+        possible_message = 'A feature name or call ID is required'
+        if parmData.get('FEATURE') and not parmData.get("ID"):
+            call_id, possible_message= self.get_call_id(parmData['FEATURE'].upper(), 'standardize')
+            if call_id:
+                parmData['ID'] = call_id
+        if not parmData.get('ID'):
+            colorize_msg(possible_message, 'error')
             return
 
         sfcallRecord = self.getRecord('CFG_SFCALL', 'SFCALL_ID', parmData['ID'])
@@ -2850,7 +2864,7 @@ class G2CmdShell(cmd.Cmd, object):
             efbomData = {}
             efbomData['order'] = efbomRecord['EXEC_ORDER']
             if efbomRecord['FTYPE_ID'] == 0:
-                efbomData['feature'] = 'parent'
+                efbomData['featureLink'] = 'parent'
             elif ftypeRecord3:
                 efbomData['feature'] = ftypeRecord3['FTYPE_CODE']
             if felemRecord3:
@@ -2883,6 +2897,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
+            if not parmData.get('FUNCTION') and parmData.get('EXPRESSION'):
+                parmData['FUNCTION'] = parmData['EXPRESSION']
             self.validate_parms(parmData, ['FUNCTION', 'ELEMENTLIST'])
             parmData['ID'] = parmData.get('ID', 0)
             parmData['EXECORDER'] = parmData.get('EXECORDER', 0)
@@ -2891,7 +2907,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Command error: {err}', 'error')
             return
 
-        efcallID = self.checkDesiredRecordID('CFG_EFCALL', 'EFCALL_ID', parmData.get('ID'), seed_order=1000)
+        efcallID = self.getDesiredValueOrNext('CFG_EFCALL', 'EFCALL_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and efcallID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -2916,7 +2932,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Either a feature or an element must be specified, but not both', 'error')
             return
 
-        efcallOrder = self.checkDesiredRecordID('CFG_EFCALL', ['FTYPE_ID', 'FELEM_ID', 'EXEC_ORDER'], [ftypeID, felemID, parmData.get('EXECORDER')])
+        efcallOrder = self.getDesiredValueOrNext('CFG_EFCALL', ['FTYPE_ID', 'FELEM_ID', 'EXEC_ORDER'], [ftypeID, felemID, parmData.get('EXECORDER')])
         if parmData['EXECORDER'] and efcallOrder != parmData['EXECORDER']:
             colorize_msg('The specified execution order for the feature/element is already taken', 'error')
             return
@@ -3027,18 +3043,25 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single expression call
 
         Syntax:
-            getExpressionCall id [table|json|jsonl]
+            getExpressionCall id or feature [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
-            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
-            self.validate_parms(parmData, ['ID'])
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID" if arg.isdigit() else "FEATURE": int(arg) if arg.isdigit() else arg}
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
+            return
+
+        possible_message = 'A feature name or call ID is required'
+        if parmData.get('FEATURE') and not parmData.get("ID"):
+            call_id, possible_message= self.get_call_id(parmData['FEATURE'].upper(), 'expression')
+            if call_id:
+                parmData['ID'] = call_id
+        if not parmData.get('ID'):
+            colorize_msg(possible_message, 'error')
             return
 
         efcallRecord = self.getRecord('CFG_EFCALL', 'EFCALL_ID', parmData['ID'])
@@ -3116,6 +3139,8 @@ class G2CmdShell(cmd.Cmd, object):
             return
         try:
             parmData = dictKeysUpper(json.loads(arg))
+            if not parmData.get('FUNCTION') and parmData.get('COMPARISON'):
+                parmData['FUNCTION'] = parmData['COMPARISON']
             self.validate_parms(parmData, ['FEATURE', 'FUNCTION', 'ELEMENTLIST'])
             parmData['ID'] = parmData.get('ID', 0)
             parmData['FEATURE'] = parmData['FEATURE'].upper()
@@ -3124,7 +3149,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Command error: {err}', 'error')
             return
 
-        cfcallID = self.checkDesiredRecordID('CFG_CFCALL', 'CFCALL_ID', parmData.get('ID'), seed_order=1000)
+        cfcallID = self.getDesiredValueOrNext('CFG_CFCALL', 'CFCALL_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and cfcallID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -3211,18 +3236,25 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single comparison call
 
         Syntax:
-            getComparisonCall id [table|json|jsonl]
+            getComparisonCall id or feature [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
-            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
-            self.validate_parms(parmData, ['ID'])
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID" if arg.isdigit() else "FEATURE": int(arg) if arg.isdigit() else arg}
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
+            return
+
+        possible_message = 'A feature name or call ID is required'
+        if parmData.get('FEATURE') and not parmData.get("ID"):
+            call_id, possible_message= self.get_call_id(parmData['FEATURE'].upper(), 'comparison')
+            if call_id:
+                parmData['ID'] = call_id
+        if not parmData.get('ID'):
+            colorize_msg(possible_message, 'error')
             return
 
         cfcallRecord = self.getRecord('CFG_CFCALL', 'CFCALL_ID', parmData['ID'])
@@ -3310,7 +3342,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Command error: {err}', 'error')
             return
 
-        dfcallID = self.checkDesiredRecordID('CFG_DFCALL', 'DFCALL_ID', parmData.get('ID'), seed_order=1000)
+        dfcallID = self.getDesiredValueOrNext('CFG_DFCALL', 'DFCALL_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and dfcallID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -3397,18 +3429,25 @@ class G2CmdShell(cmd.Cmd, object):
         Returns a single distinct call
 
         Syntax:
-            getDistinctCall id [table|json|jsonl]
+            getDistinctCall id or feature [table|json|jsonl]
         """
         arg = self.check_arg_for_output_format('record', arg)
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
             return
         try:
-            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID": arg}
-            parmData['ID'] = int(parmData['ID']) if isinstance(parmData['ID'], str) and parmData['ID'].isdigit() else parmData['ID']
-            self.validate_parms(parmData, ['ID'])
+            parmData = dictKeysUpper(json.loads(arg)) if arg.startswith('{') else {"ID" if arg.isdigit() else "FEATURE": int(arg) if arg.isdigit() else arg}
         except Exception as err:
             colorize_msg(f'Command error: {err}', 'error')
+            return
+
+        possible_message = 'A feature name or call ID is required'
+        if parmData.get('FEATURE') and not parmData.get("ID"):
+            call_id, possible_message= self.get_call_id(parmData['FEATURE'].upper(), 'distinct')
+            if call_id:
+                parmData['ID'] = call_id
+        if not parmData.get('ID'):
+            colorize_msg(possible_message, 'error')
             return
 
         dfcallRecord = self.getRecord('CFG_DFCALL', 'DFCALL_ID', parmData['ID'])
@@ -3470,25 +3509,41 @@ class G2CmdShell(cmd.Cmd, object):
             func_table = 'CFG_DFUNC'
             func_code_field = 'DFUNC_CODE'
             func_id_field = 'DFUNC_ID'
+        elif call_type == 'standardize':
+            call_table = 'CFG_SFCALL'
+            bom_table = None
+            call_id_field = 'SFCALL_ID'
+            func_table = 'CFG_SFUNC'
+            func_code_field = 'SFUNC_CODE'
+            func_id_field = 'SFUNC_ID'
         return call_table, bom_table, call_id_field, func_table, func_code_field, func_id_field
 
     def prepCallElement(self, arg):
         try:
             parmData = dictKeysUpper(json.loads(arg))
-            self.validate_parms(parmData, ['CALL_TYPE', 'CALL_ID', 'ELEMENT'])
+            self.validate_parms(parmData, ['CALLTYPE', 'ELEMENT'])
         except Exception as err:
-            colorize_msg(f'Command error: {err}', 'error')
-            return None
+            return {'error': err}
 
-        parmData['CALL_TYPE'], message = self.validateDomain('Call type', parmData.get('CALL_TYPE'), ['expression', 'comparison', 'distinct'])
-        if not parmData['CALL_TYPE']:
+        parmData['CALLTYPE'], message = self.validateDomain('Call type', parmData.get('CALLTYPE'), ['expression', 'comparison', 'distinct'])
+        if not parmData['CALLTYPE']:
             return {'error': message}
+        call_table, bom_table, call_id_field, func_table, func_code_field, func_id_field = self.setCallTypeTables(parmData['CALLTYPE'])
 
-        call_table, bom_table, call_id_field, func_table, func_code_field, func_id_field = self.setCallTypeTables(parmData['CALL_TYPE'])
+        if parmData.get('FEATURE') and not parmData.get("ID"):
+            call_id, possible_message= self.get_call_id(parmData['FEATURE'].upper(), parmData['CALLTYPE'])
+            if call_id:
+                parmData['ID'] = call_id
+        else:
+            possible_message = 'The call_id must be specified'
 
-        callRecord = self.getRecord(call_table, call_id_field, parmData['CALL_ID'])
+        if not parmData.get("ID"):
+            #return {'error': f"The call ID number must be specified - see list{parmData['CALLTYPE'][0:1].upper() + parmData['CALLTYPE'][1:].lower()}Calls to determine"}
+            return {'error': possible_message}
+
+        callRecord = self.getRecord(call_table, call_id_field, parmData['ID'])
         if not callRecord:
-            return {'error': f"Call ID {parmData['CALL_ID']} does not exist"}
+            return {'error': f"Call ID {parmData['ID']} does not exist"}
 
         ftypeID = -1
         if parmData.get('FEATURE'):
@@ -3515,25 +3570,17 @@ class G2CmdShell(cmd.Cmd, object):
         if not required:
             return {'error': message}
 
-        foundRecord = None
-        lastOrder = 0
-        for bomRecord in self.getRecordList(bom_table, call_id_field, parmData['CALL_ID']):
-            if bomRecord['FTYPE_ID'] == ftypeID and bomRecord['FELEM_ID'] == felemID:
-                foundRecord = bomRecord
-                break
-            if bomRecord['EXEC_ORDER'] > lastOrder:
-                lastOrder = bomRecord['EXEC_ORDER']
-
-        callElementData = {'call_type': parmData['CALL_TYPE'],
+        bomRecord = self.getRecord(bom_table, [call_id_field, 'FTYPE_ID', 'FELEM_ID'], [parmData['ID'], ftypeID, felemID])
+        callElementData = {'call_type': parmData['CALLTYPE'],
                            'call_table': call_table,
                            'bom_table': bom_table,
                            'call_id_field': call_id_field,
-                           'call_id': parmData['CALL_ID'],
+                           'call_id': parmData['ID'],
                            'ftypeID': ftypeID,
                            'felemID': felemID,
+                           'exec_order': parmData.get('EXECORDER', 0),
                            'required': required,
-                           'bomRecord': foundRecord,
-                           'lastOrder': lastOrder}
+                           'bomRecord': bomRecord}
         return callElementData
 
     def do_addCallElement(self, arg):
@@ -3543,12 +3590,14 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             addCallElement {json_configuration}
 
-        Example:
-            addCallElement {"call_type": "expression", "call_id": 7, "feature": "ADDRESS", "element": "STR_NUM", "required": "No"}
+        Examples:
+            addCallElement {"callType": "comparison", "feature": "ADDRESS", "element": "PLACEKEY"}
+            addCallElement {"callType": "distinct", "feature": "NAME", "element": "ORIG_FN"}
+            addCallElement {"callType": "expression", "id": 7, "feature": "ADDRESS", "element": "STR_NUM", "required": "No"}
 
         Notes:
-            This command appends an additional feature and element to an existing expression call.  In the example above, the street number
-            computed by the address parser will be added to the list of composite keys created on names.
+            You can usually add an element to a call by specifying the call's triggering feature and the element to add.  The call ID number
+            will need to be specified if a feature has multiple calls or if the expression call is based on an element rather than a feature.
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -3562,9 +3611,14 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Feature/element already exists for call', 'warning')
             return
 
+        execOrder = self.getDesiredValueOrNext(callElementData['bom_table'], [callElementData['call_id_field'], 'EXEC_ORDER'], [callElementData['call_id'], callElementData.get('exec_order', 0)])
+        if callElementData.get('exec_order') and execOrder != callElementData['exec_order']:
+            colorize_msg('The specified order is already taken (remove it to assign the next available)', 'error')
+            return
+
         newRecord = {}
         newRecord[callElementData['call_id_field']] = callElementData['call_id']
-        newRecord['EXEC_ORDER'] = callElementData['lastOrder'] + 1
+        newRecord['EXEC_ORDER'] = execOrder
         newRecord['FTYPE_ID'] = callElementData['ftypeID']
         newRecord['FELEM_ID'] = callElementData['felemID']
         if callElementData['bom_table'] == 'CFG_EFBOM':
@@ -3581,8 +3635,14 @@ class G2CmdShell(cmd.Cmd, object):
         Syntax:
             deleteCallElement {json_configuration}
 
-        Example:
-            deleteCallElement {"call_type": "expression", "call_id": 7, "feature": "ADDRESS", "element": "STR_NUM"}
+        Examples:
+            deleteCallElement {"callType": "comparison", "feature": "ADDRESS", "element": "PLACEKEY"}
+            deleteCallElement {"callType": "distinct", "feature": "NAME", "element": "ORIG_FN"}
+            deleteCallElement {"callType": "expression", "id": 7, "feature": "ADDRESS", "element": "STR_NUM"}
+
+        Notes:
+            You can usually delete an element from a call by specifying the call's triggering feature and the element to add.  The call ID number
+            will need to be specified if a feature has multiple calls or if the expression call is based on an element rather than a feature.
         """
         if not arg:
             self.do_help(sys._getframe(0).f_code.co_name)
@@ -3602,14 +3662,29 @@ class G2CmdShell(cmd.Cmd, object):
 
     # convenience functions
 
-    def getCallID(self, feature, call_type, function):
+    def get_call_id(self, feature, call_type, function = None):
         call_table, bom_table, call_id_field, func_table, func_code_field, func_id_field = self.setCallTypeTables(call_type)
-        try:
+        ftypeRecord, message = self.lookupFeature(feature.upper())
+        if not ftypeRecord:
+            return 0, 'Feature not found'
+        if function:
             func_id = self.getRecord(func_table, func_code_field, function)[func_id_field]
-            call_id = self.getRecord(call_table, func_id_field, func_id)[call_id_field]
-        except Exception:
-            return 0
-        return call_id
+            if not func_id:
+                return 0, function + ' not found'
+            callRecord = self.getRecord(call_table, ['FTYPE_ID', func_id_field], [ftypeRecord['FTYPE_ID'], func_id])
+        else:
+            callRecordList = self.getRecordList(call_table, 'FTYPE_ID', ftypeRecord['FTYPE_ID'])
+            if len(callRecordList) == 1:
+                callRecord = callRecordList[0]
+            elif len(callRecordList) > 1:
+                return 0, 'Multiple call records found for feature'
+            else:
+                return 0, 'Call record not found'
+
+        if not callRecord:
+            return 0, 'Call record not found'
+
+        return callRecord[call_id_field], 'success'
 
     def do_addToNamehash(self, arg):
         """
@@ -3632,13 +3707,14 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Command error: {err}', 'error')
             return
 
-        nameHasher_efcallID = self.getCallID('NAME', 'expression', 'NAME_HASHER')
-        if not nameHasher_efcallID:
-            colorize_msg('Name hasher call not found', 'error')
+        parmData['CALLTYPE'] = 'expression'
+        call_id, message = self.get_call_id('NAME', parmData['CALLTYPE'], 'NAME_HASHER')
+        if not call_id:
+            colorize_msg(message, 'error')
             return
 
-        parmData['call_type'] = 'expression'
-        parmData['call_id'] = nameHasher_efcallID
+        parmData['ID'] = call_id
+        print(call_id)
         self.do_addCallElement(json.dumps(parmData))
 
     def do_deleteFromNamehash(self, arg):
@@ -3659,13 +3735,13 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Command error: {err}', 'error')
             return
 
-        nameHasher_efcallID = self.getCallID('NAME', 'expression', 'NAME_HASHER')
-        if not nameHasher_efcallID:
-            colorize_msg('Name hasher call not found', 'error')
+        parmData['CALLTYPE'] = 'expression'
+        call_id, message = self.get_call_id('NAME', parmData['CALLTYPE'], 'NAME_HASHER')
+        if not call_id:
+            colorize_msg(message, 'error')
             return
 
-        parmData['call_type'] = 'expression'
-        parmData['call_id'] = nameHasher_efcallID
+        parmData['ID'] = call_id
         self.do_deleteCallElement(json.dumps(parmData))
 
 
@@ -3827,7 +3903,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(message, 'warning')
             return
 
-        next_id = self.checkDesiredRecordID('CFG_GPLAN', 'GPLAN_ID', 0)
+        next_id = self.getDesiredValueOrNext('CFG_GPLAN', 'GPLAN_ID', 0)
 
         newRecord = {}
         newRecord['GPLAN_ID'] = next_id
@@ -4195,7 +4271,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Function already exists', 'warning')
             return
 
-        sfuncID = self.checkDesiredRecordID('CFG_SFUNC', 'SFUNC_ID', parmData.get('ID'))
+        sfuncID = self.getDesiredValueOrNext('CFG_SFUNC', 'SFUNC_ID', parmData.get('ID'))
         if parmData.get('ID') and sfuncID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -4270,7 +4346,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Function already exists', 'warning')
             return
 
-        efuncID = self.checkDesiredRecordID('CFG_EFUNC', 'EFUNC_ID', parmData.get('ID'))
+        efuncID = self.getDesiredValueOrNext('CFG_EFUNC', 'EFUNC_ID', parmData.get('ID'))
         if parmData.get('ID') and efuncID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -4350,7 +4426,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Function already exists', 'warning')
             return
 
-        cfuncID = self.checkDesiredRecordID('CFG_CFUNC', 'CFUNC_ID', parmData.get('ID'))
+        cfuncID = self.getDesiredValueOrNext('CFG_CFUNC', 'CFUNC_ID', parmData.get('ID'))
         if parmData.get('ID') and cfuncID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -4447,7 +4523,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(f'Command error: {err}', 'error')
             return
 
-        cfrtnID = self.checkDesiredRecordID('CFG_CFRTN', 'CFRTN_ID', parmData.get('ID'))
+        cfrtnID = self.getDesiredValueOrNext('CFG_CFRTN', 'CFRTN_ID', parmData.get('ID'))
         if parmData.get('ID') and cfrtnID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -4478,7 +4554,7 @@ class G2CmdShell(cmd.Cmd, object):
         elif parmData.get('EXECORDER'):
             execOrder = parmData.get('EXECORDER')
         else:
-            execOrder = self.checkDesiredRecordID('CFG_CFRTN', ['CFUNC_ID', 'FTYPE_ID', 'EXEC_ORDER'], [cfuncID, 0, 0])
+            execOrder = self.getDesiredValueOrNext('CFG_CFRTN', ['CFUNC_ID', 'FTYPE_ID', 'EXEC_ORDER'], [cfuncID, 0, 0])
 
         newRecord = {}
         newRecord['CFRTN_ID'] = cfrtnID
@@ -4643,7 +4719,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg('Function already exists', 'warning')
             return
 
-        dfuncID = self.checkDesiredRecordID('CFG_DFUNC', 'DFUNC_ID', parmData.get('ID'))
+        dfuncID = self.getDesiredValueOrNext('CFG_DFUNC', 'DFUNC_ID', parmData.get('ID'))
         if parmData.get('ID') and dfuncID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -4714,7 +4790,7 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(message, 'error')
             return
 
-        felemID = self.checkDesiredRecordID('CFG_FELEM', 'FELEM_ID', parmData.get('ID'), seed_order=1000)
+        felemID = self.getDesiredValueOrNext('CFG_FELEM', 'FELEM_ID', parmData.get('ID'), seed_order=1000)
         if parmData.get('ID') and felemID != parmData['ID']:
             colorize_msg('The specified ID is already taken (remove it to assign the next available)', 'error')
             return
@@ -4791,6 +4867,13 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg("Element does not exist", 'warning')
             return
 
+        fbomRecordList = self.getRecordList('CFG_FBOM', 'FELEM_ID', elementRecord['FELEM_ID'])
+        if fbomRecordList:
+            featureList = ','.join((self.getRecord('CFG_FTYPE', 'FTYPE_ID', x['FTYPE_ID'])['FTYPE_CODE'] for x in fbomRecordList))
+            colorize_msg(f"Element linked to the following feature(s): {featureList}", 'error')
+            return
+
+
         self.cfgData['G2_CONFIG']['CFG_FELEM'].remove(elementRecord)
         colorize_msg('Element successfully deleted!', 'success')
         self.configUpdated = True
@@ -4847,7 +4930,7 @@ class G2CmdShell(cmd.Cmd, object):
 
         parmData['DISPLAY_DELIM'] = parmData.get('DISPLAY_DELIM', None)
         parmData['DISPLAY_LEVEL'] = parmData.get('DISPLAY_LEVEL', 0)
-        parmData['EXECORDER'] = self.checkDesiredRecordID('CFG_FBOM', ['FTYPE_ID', 'EXEC_ORDER'], [ftypeID, parmData.get('EXECORDER', 0)])
+        parmData['EXECORDER'] = self.getDesiredValueOrNext('CFG_FBOM', ['FTYPE_ID', 'EXEC_ORDER'], [ftypeID, parmData.get('EXECORDER', 0)])
 
         newRecord = {}
         newRecord['FTYPE_ID'] = ftypeID
@@ -5014,7 +5097,7 @@ class G2CmdShell(cmd.Cmd, object):
             return
 
         if parmData['SECTION'] in self.cfgData['G2_CONFIG']:
-            colorize_msg('Configuration already exists!', 'error')
+            colorize_msg('Configuration section already exists!', 'error')
             return
 
         self.cfgData['G2_CONFIG'][parmData['SECTION']] = []
@@ -5116,6 +5199,9 @@ class G2CmdShell(cmd.Cmd, object):
 
 # ===== Deprecated/replaced commands =====
 
+    def print_replacement(self, old, new):
+        print(f"\n{colorize(old[3:], 'caution')} is being deprecated - please use {colorize(new[3:], 'caution')} in the future.\n")
+
     def do_addStandardizeFunc(self, arg):
         self.do_addStandardizeFunction(arg)
 
@@ -5127,6 +5213,30 @@ class G2CmdShell(cmd.Cmd, object):
 
     def do_addComparisonFuncReturnCode(self, arg):
         self.do_addComparisonThreshold(arg)
+        self.print_replacement(sys._getframe(0).f_code.co_name, 'do_addComparisonThreshold')
+
+    def do_addFeatureComparison(self, arg):
+        self.do_addComparisonCall(arg)
+        self.print_replacement(sys._getframe(0).f_code.co_name, 'do_addComparisonCall')
+
+    def do_deleteFeatureComparison(self, arg):
+        self.do_deleteComparisonCall(arg)
+        self.print_replacement(sys._getframe(0).f_code.co_name, 'do_deleteComparisonCall')
+
+    def do_addFeatureComparisonElement(self, arg):
+        if arg:
+            arg = '{"callType": "comparison", ' + arg[1:]
+            self.do_addCallElement(arg)
+        self.print_replacement(sys._getframe(0).f_code.co_name, 'do_addCallElement')
+
+    def do_deleteFeatureComparisonElement(self, arg):
+        if arg:
+            arg = '{"callType": "comparison", ' + arg[1:]
+            self.do_deleteCallElement(arg)
+        self.print_replacement(sys._getframe(0).f_code.co_name, 'do_deleteCallElement')
+
+
+
 
 
     # addFeatureDistinctCallElement   replaced with addCallElement
