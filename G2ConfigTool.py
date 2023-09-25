@@ -2223,10 +2223,16 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(message, 'error')
             return
 
-        fbomRecord, message = self.lookupFeatureElement(parmData['FEATURE'], parmData['ELEMENT'])
-        if not fbomRecord:
-            colorize_msg(message, 'error')
-            return
+        if parmData['ELEMENT'] in ('<PREHASHED>', 'USED_FROM_DT', 'USED_THRU_DT', 'USAGE_TYPE'):
+            featRecord, message = self.lookupFeature(parmData['FEATURE'])
+            if not featRecord:
+                colorize_msg(message, 'error')
+                return
+        else:
+            fbomRecord, message = self.lookupFeatureElement(parmData['FEATURE'], parmData['ELEMENT'])
+            if not fbomRecord:
+                colorize_msg(message, 'error')
+                return
 
         parmData['REQUIRED'], message = self.validateDomain('Required', parmData.get('REQUIRED', 'No'), ['Yes', 'No', 'Any', 'Desired'])
         if not parmData['REQUIRED']:
