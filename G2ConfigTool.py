@@ -2060,17 +2060,26 @@ class G2CmdShell(cmd.Cmd, object):
             colorize_msg(message, 'error')
             return
 
+        if 'DISPLAY_LEVEL' in parmData:
+            parmData['DISPLAY'] = parmData['DISPLAY_LEVEL']
         parmData['DISPLAY'], message = self.validateDomain('Display', parmData.get('DISPLAY', 'No'), ['Yes', 'No'])
         if not parmData['DISPLAY']:
             colorize_msg(message, 'error')
             return
+
+        execOrder = self.getDesiredValueOrNext('CFG_FBOM', 'EXEC_ORDER', parmData.get('EXECORDER', 0))
+        if parmData.get('EXECORDER') and execOrder != parmData['EXECORDER']:
+            colorize_msg('The specified execution order is already taken  (remove it to assign the next available)', 'error')
+            return
+        else:
+            parmData['EXECORDER'] = execOrder
 
         newRecord = {}
         newRecord['FTYPE_ID'] = ftypeID
         newRecord['FELEM_ID'] = felemID
         newRecord['EXEC_ORDER'] = parmData['EXECORDER']
         newRecord['DISPLAY_LEVEL'] = 0 if parmData['DISPLAY'] == 'No' else 'Yes'
-        newRecord['DISPLAY_DELIM'] = parmData['DISPLAY_DELIM']
+        newRecord['DISPLAY_DELIM'] = parmData.get('DISPLAY_DELIM')
         newRecord['DERIVED'] = parmData['DERIVED']
         self.cfgData['G2_CONFIG']['CFG_FBOM'].append(newRecord)
         self.configUpdated = True
@@ -5435,8 +5444,8 @@ class G2CmdShell(cmd.Cmd, object):
         self.print_replacement(sys._getframe(0).f_code.co_name, 'do_deleteExpressionCallElement')
 
     def do_updateAttributeAdvanced(self, arg):
-        self.do_set_attribute(arg)
-        self.print_replacement(sys._getframe(0).f_code.co_name, 'do_set_attribute')
+        self.do_setAttribute(arg)
+        self.print_replacement(sys._getframe(0).f_code.co_name, 'do_setAttribute')
 
     def do_updateFeatureVersion(self, arg):
         self.do_setFeature(arg)
