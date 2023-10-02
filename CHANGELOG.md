@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 [markdownlint](https://dlaa.me/markdownlint/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.3] - 2023-10-02
+
+### Changed in 2.3.3
+
+- In `Dockerfile`, updated FROM instruction to `senzing/senzingapi-tools:3.7.1`
 
 ## [2.3.2] - 2023-09-25
 
@@ -13,13 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - fixed issue #117 add deprecated commands back in to support upgrades from Senzing version 2.x
 
-
 ## [2.3.1] - 2023-09-05
 
 ### Changed in 2.3.1
 
 - fixed issue #112 where importFromFile did not trigger config updated flag
-
 
 ## [2.3.0] - 2023-07-18
 
@@ -27,9 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Code has been refactored
 - added support for ...
-    - behavior overrides
-    - comparison thresholds
-    - clone generic plans
+  - behavior overrides
+  - comparison thresholds
+  - clone generic plans
 - issues: #106, #98, #97,#95, #86, #76, #30
 
 ## [2.2.5] - 2023-05-11
