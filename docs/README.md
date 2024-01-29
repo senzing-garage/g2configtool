@@ -1,4 +1,4 @@
-# template-repository
+# g2configtool
 
 Placeholder for [GitHub pages](https://pages.github.com/).
 
