@@ -26,6 +26,7 @@ disable=
     no-else-return,
     no-member,
     no-self-use,
+    possibly-used-before-assignment,
     protected-access,
     redefined-outer-name,
     simplifiable-if-expression,

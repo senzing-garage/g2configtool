@@ -1,11 +1,11 @@
-ARG BASE_IMAGE=senzing/senzingapi-tools:3.9.0
+ARG BASE_IMAGE=senzing/senzingapi-tools:3.10.1
 FROM ${BASE_IMAGE}
 
-ENV REFRESHED_AT=2024-03-18
+ENV REFRESHED_AT=2024-05-22
 
 LABEL Name="senzing/g2configtool" \
-      Maintainer="support@senzing.com" \
-      Version="2.3.3"
+  Maintainer="support@senzing.com" \
+  Version="2.3.4"
 
 HEALTHCHECK CMD ["/app/healthcheck.sh"]
 
