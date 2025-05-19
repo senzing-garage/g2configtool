@@ -1,3 +1,8 @@
 .DS_Store
-.history
 .pydevproject
+
+# Visual Studio code
+.vscode/*
+!.vscode/cspell.json
+*.code-workspace
+.history
