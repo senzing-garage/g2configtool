@@ -47,7 +47,7 @@ Configuration values specified by environment variable or command line parameter
    ```
 
    1. :warning:
-      **macOS** - [File sharing MacOS]
+      **macOS** - [File sharing macOS]
       must be enabled for `SENZING_VOLUME`.
    1. :warning:
       **Windows** - [File sharing Windows]
@@ -70,9 +70,9 @@ For other databases, these steps may be skipped.
 
 ## References
 
-- [Development](docs/development.md)
-- [Errors](docs/errors.md)
-- [Examples](docs/examples.md)
+- [Development]
+- [Errors]
+- [Examples]
 - Related artifacts
 
 [Configuration]: #configuration
@@ -81,7 +81,7 @@ For other databases, these steps may be skipped.
 [Errors]: docs/errors.md
 [Examples]: docs/examples.md
 [Expectations]: #expectations
-[File sharing MacOS]: https://github.com/senzing-garage/knowledge-base/blob/main/HOWTO/share-directories-with-docker.md#macos
+[File sharing macOS]: https://github.com/senzing-garage/knowledge-base/blob/main/HOWTO/share-directories-with-docker.md#macos
 [File sharing Windows]: https://github.com/senzing-garage/knowledge-base/blob/main/HOWTO/share-directories-with-docker.md#windows
 [References]: #references
 [Senzing Garage]: https://github.com/senzing-garage

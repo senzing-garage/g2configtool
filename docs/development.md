@@ -4,7 +4,7 @@
 
 The following software programs need to be installed:
 
-1. [git](https://github.com/senzing-garage/knowledge-base/blob/main/WHATIS/git.md)
+1. [Git](https://github.com/senzing-garage/knowledge-base/blob/main/WHATIS/git.md)
 1. [make](https://github.com/senzing-garage/knowledge-base/blob/main/WHATIS/make.md)
 
 ## Clone repository
